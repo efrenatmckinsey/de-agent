@@ -43,9 +43,11 @@ metadata:
     app.kubernetes.io/name: hydra-worker
 type: Opaque
 stringData:
-  # Replace with real credentials via Sealed Secrets, External Secrets, or CSI driver.
-  AWS_ACCESS_KEY_ID: "CHANGEME"
-  AWS_SECRET_ACCESS_KEY: "CHANGEME"
+  # WARNING: Do NOT commit real credentials here.
+  # In production, use Sealed Secrets, External Secrets Operator, or CSI Secret Store.
+  # These placeholders exist only to document required keys.
+  AWS_ACCESS_KEY_ID: "REPLACE_VIA_SEALED_SECRETS"
+  AWS_SECRET_ACCESS_KEY: "REPLACE_VIA_SEALED_SECRETS"
   USDA_API_KEY: ""
   CENSUS_API_KEY: ""
 

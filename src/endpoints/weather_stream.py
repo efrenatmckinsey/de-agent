@@ -13,12 +13,14 @@ from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from typing import Any
 
+import os
+
 import httpx
 
 BASE_URL = "https://api.weather.gov"
 
-# NOAA requires a User-Agent with contact info; do not use a generic library default.
-DEFAULT_USER_AGENT = "(hydra-ingest, contact@example.com)"
+_contact = os.environ.get("HYDRA_CONTACT_EMAIL", "set-HYDRA_CONTACT_EMAIL@example.com")
+DEFAULT_USER_AGENT = f"(hydra-ingest, {_contact})"
 
 
 class NOAAWeatherClient:

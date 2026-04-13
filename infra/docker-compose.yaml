@@ -52,8 +52,8 @@ services:
       - "9000:9000"
       - "9001:9001"
     environment:
-      MINIO_ROOT_USER: hydra
-      MINIO_ROOT_PASSWORD: hydra-hydra-change-me
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-hydra}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env or environment}
     volumes:
       - minio-data:/data
     networks:

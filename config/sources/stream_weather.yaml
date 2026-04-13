@@ -13,7 +13,8 @@ connection:
   base_url: https://api.weather.gov
   protocol: sse
   reconnect_interval: 30s
-  user_agent: hydra-ingest/1.0 (data-pipeline; contact@example.com)
+  # Set HYDRA_CONTACT_EMAIL in your environment; NOAA requires a real contact.
+  user_agent: hydra-ingest/1.0 (data-pipeline; ${HYDRA_CONTACT_EMAIL})
   headers:
     Accept: application/geo+json
 
