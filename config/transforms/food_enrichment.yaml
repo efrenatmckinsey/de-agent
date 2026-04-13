@@ -6,6 +6,13 @@
 # =============================================================================
 
 transform_id: food_nutrient_enrichment
+description: >
+  Enriches raw USDA FoodData Central payloads into a curated nutrient-analysis
+  table. Filters out records with missing nutrient arrays, flattens the nested
+  nutrients list into individual rows (nutrient_name, nutrient_value, unit),
+  aggregates average and maximum nutrient values per food category, then derives
+  a nutrient-density score. A quality gate validates non-null categories, and
+  that density values fall within a plausible range before landing to Iceberg.
 
 # auto → planner chooses Spark vs Python from estimated row volume
 engine_hint: auto

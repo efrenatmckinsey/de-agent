@@ -87,6 +87,9 @@ body.mx .ex.grid{display:grid}body.mt .tc.grid{display:grid}
 .btn-red{background:linear-gradient(135deg,#991b1b,var(--red))}
 .btn:disabled{opacity:.5;cursor:not-allowed;transform:none!important;box-shadow:none!important}
 .btn-sm{padding:6px 14px;font-size:11px}
+.reset-btn{width:80px;padding:6px 0;border:1px solid var(--bdr);border-radius:8px;background:var(--s2);color:var(--dim);font-size:11px;font-weight:600;cursor:pointer;transition:border-color .2s, color .2s;text-align:center;line-height:1.4}
+.reset-btn:hover{border-color:var(--red);color:var(--red)}
+.reset-btn:disabled{opacity:.5;cursor:wait}
 .btn-group{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
 
 /* ---- Source selector ---- */
@@ -142,6 +145,7 @@ body.mx .ex.grid{display:grid}body.mt .tc.grid{display:grid}
   <div class="logo">hydra-ingest</div>
   <div style="display:flex;gap:16px;align-items:center">
     <div class="conn" id="conn-status"><div class="dot"></div> Connected</div>
+    <button class="reset-btn" onclick="resetPortal()" id="btn-reset" title="Clear all results and return to initial state">↺ Reset</button>
     <div class="mode-sw">
       <button class="mbtn ax" onclick="setMode('exec')" id="bx">Executive</button>
       <button class="mbtn" onclick="setMode('tech')" id="bt">Technical</button>
@@ -251,6 +255,7 @@ body.mx .ex.grid{display:grid}body.mt .tc.grid{display:grid}
     <div class="source-sel">
       <select id="txf-select"><option value="">Loading transforms...</option></select>
     </div>
+    <div id="txf-desc" style="background:var(--s2);border:1px solid var(--bdr);border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:12px;color:var(--dim);line-height:1.7;display:none"></div>
 
     <div class="btn-group">
       <button class="btn btn-green btn-sm" onclick="runValidate()" id="btn-validate">✓ Validate DSL</button>
@@ -365,6 +370,17 @@ async function loadConfigs() {
       opt.textContent = `${tid}  (engine: ${cfg.engine_hint || 'auto'})`;
       tsel.appendChild(opt);
     }
+    const txfDescEl = document.getElementById('txf-desc');
+    tsel.onchange = () => {
+      const cfg = transforms[tsel.value];
+      if (cfg && cfg.description) {
+        txfDescEl.textContent = cfg.description.trim();
+        txfDescEl.style.display = 'block';
+      } else {
+        txfDescEl.style.display = 'none';
+      }
+    };
+    tsel.dispatchEvent(new Event('change'));
 
     // Tech sources list
     const tsDiv = document.getElementById('tech-sources');
@@ -375,9 +391,10 @@ async function loadConfigs() {
     }
     const ttDiv = document.getElementById('tech-transforms');
     if (ttDiv) {
-      ttDiv.innerHTML = Object.entries(transforms).map(([tid, cfg]) =>
-        `<div style="margin:4px 0"><span class="badge b-vio">${cfg.engine_hint || 'auto'}</span> <strong>${tid}</strong> → ${cfg.output?.table || ''} (${(cfg.steps||[]).length} steps)</div>`
-      ).join('');
+      ttDiv.innerHTML = Object.entries(transforms).map(([tid, cfg]) => {
+        const desc = cfg.description ? `<div style="color:var(--dim);font-size:11px;margin:2px 0 8px 0;line-height:1.6">${escHtml(cfg.description.trim())}</div>` : '';
+        return `<div style="margin:6px 0;padding:8px 0;border-bottom:1px solid var(--bdr)"><span class="badge b-vio">${cfg.engine_hint || 'auto'}</span> <strong>${tid}</strong> → <code>${cfg.output?.table || ''}</code> (${(cfg.steps||[]).length} steps)${desc}</div>`;
+      }).join('');
     }
 
     // Render run history
@@ -642,6 +659,52 @@ function renderHistory(runs) {
       <span style="float:right;color:var(--dim)">${r.ts?.substring(11,19) || ''}</span>
     </div>`;
   }).join('');
+}
+
+// ---- Reset ----
+async function resetPortal() {
+  const btn = document.getElementById('btn-reset');
+  if (btn.disabled) return;
+  btn.disabled = true;
+  btn.style.opacity = '.4';
+
+  try {
+    await fetch(API + '/api/reset', { method: 'POST' });
+  } catch {}
+
+  // Clear all result panels
+  ['discover-result','ingest-result','validate-result','transform-result'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = '';
+  });
+
+  // Clear log streams
+  ['log-stream','log-stream-obs'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = '';
+  });
+
+  // Clear run history
+  const rh = document.getElementById('run-history');
+  if (rh) rh.innerHTML = 'No runs yet. Use the Control Panel to trigger operations.';
+
+  // Reset stats
+  ['s-runs','st-runs'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = '0';
+  });
+
+  // Reset source/transform badges
+  const stb = document.getElementById('src-type-badge');
+  if (stb) stb.style.display = 'none';
+  const txd = document.getElementById('txf-desc');
+  if (txd) txd.style.display = 'none';
+
+  // Jump back to Overview tab
+  setPhase('overview');
+
+  btn.disabled = false;
+  btn.style.opacity = '';
 }
 
 // ---- Init ----

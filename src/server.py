@@ -130,6 +130,10 @@ class PipelineState:
         async with self.lock:
             return list(self.runs)
 
+    async def clear(self) -> None:
+        async with self.lock:
+            self.runs.clear()
+
 
 STATE = PipelineState()
 
@@ -408,6 +412,21 @@ async def validate_transform(transform_id: str):
 
 
 # ---- Pipeline Status ----
+
+@app.post("/api/reset")
+async def reset_state():
+    """Clear all run history, drain the log buffer, and return the portal to initial state."""
+    await STATE.clear()
+    drained = 0
+    while not LOG_BUFFER.empty():
+        try:
+            LOG_BUFFER.get_nowait()
+            drained += 1
+        except queue.Empty:
+            break
+    log.info("portal.reset", runs_cleared=True, logs_drained=drained)
+    return {"status": "ok", "message": "All state cleared — portal returned to initial state."}
+
 
 @app.get("/api/status")
 async def get_status():

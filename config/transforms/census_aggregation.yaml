@@ -6,6 +6,12 @@
 # =============================================================================
 
 transform_id: census_population_trends
+description: >
+  Normalizes raw Census Bureau data into a curated population-trends table.
+  Renames cryptic field codes (P1_001N → population), casts string values to
+  integers, classifies each state into a population bracket (large / medium /
+  small), then aggregates totals and state counts per bracket. A quality gate
+  enforces non-null brackets and a minimum row count before output.
 
 engine_hint: python
 
