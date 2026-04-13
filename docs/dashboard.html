@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>hydra-ingest — Live Dashboard</title>
+<style>
+:root {
+  --bg:#0f1117; --s1:#1a1d27; --s2:#232734; --bdr:#2e3348;
+  --acc:#6366f1; --acc2:#818cf8; --glow:rgba(99,102,241,.25);
+  --grn:#22c55e; --grn-d:#166534; --amb:#f59e0b; --red:#ef4444; --cyan:#06b6d4;
+  --txt:#e2e8f0; --dim:#94a3b8; --bright:#f8fafc;
+  --ex:#8b5cf6; --tc:#06b6d4;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;background:var(--bg);color:var(--txt);line-height:1.6;overflow-x:hidden}
+
+/* ---- Topbar ---- */
+.topbar{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;padding:10px 24px;background:rgba(15,17,23,.92);backdrop-filter:blur(16px);border-bottom:1px solid var(--bdr)}
+.logo{font-size:17px;font-weight:700;letter-spacing:-.5px;background:linear-gradient(135deg,var(--acc),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.mode-sw{display:flex;gap:3px;background:var(--s1);border-radius:10px;padding:3px;border:1px solid var(--bdr)}
+.mbtn{padding:7px 16px;border-radius:8px;border:none;font-size:12px;font-weight:600;cursor:pointer;transition:.3s;color:var(--dim);background:transparent}
+.mbtn.ax{background:linear-gradient(135deg,var(--ex),#a78bfa);color:#fff;box-shadow:0 2px 12px rgba(139,92,246,.3)}
+.mbtn.at{background:linear-gradient(135deg,var(--tc),#22d3ee);color:#fff;box-shadow:0 2px 12px rgba(6,182,212,.3)}
+.mbtn:hover:not(.ax):not(.at){color:var(--txt);background:var(--s2)}
+.conn{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--dim)}
+.conn .dot{width:8px;height:8px;border-radius:50%;background:var(--grn);animation:pulse-dot 2s infinite}
+@keyframes pulse-dot{0%,100%{opacity:.5}50%{opacity:1}}
+
+/* ---- Tabs ---- */
+.tabs{display:flex;justify-content:center;gap:0;padding:16px 24px 0}
+.tab{position:relative;padding:10px 24px;border:none;background:none;color:var(--dim);font-size:13px;font-weight:600;cursor:pointer;transition:.3s}
+.tab::after{content:'';position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:0;height:3px;border-radius:2px;background:var(--acc);transition:width .3s}
+.tab.active{color:var(--bright)}
+.tab.active::after{width:60%}
+.tab:hover{color:var(--txt)}
+.tab-arr{color:var(--bdr);font-size:16px;display:flex;align-items:center;padding:0 2px}
+
+/* ---- Panels ---- */
+.content{max-width:1240px;margin:0 auto;padding:24px}
+.panel{display:none;animation:fadeUp .4s ease}
+.panel.active{display:block}
+@keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+
+/* ---- Cards ---- */
+.card{background:var(--s1);border:1px solid var(--bdr);border-radius:14px;padding:24px;margin-bottom:20px;transition:.3s}
+.card:hover{border-color:var(--acc);box-shadow:0 0 24px var(--glow)}
+.card h2{font-size:19px;font-weight:700;margin-bottom:6px;color:var(--bright)}
+.card h3{font-size:14px;font-weight:600;margin:12px 0 6px;color:var(--acc2)}
+.card p{color:var(--dim);margin-bottom:8px;font-size:14px}
+.card code{background:var(--s2);padding:1px 5px;border-radius:3px;font-size:12px;color:var(--cyan)}
+
+/* ---- Stat row ---- */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin:16px 0}
+.stat{background:var(--s2);border-radius:10px;padding:16px;text-align:center;border:1px solid var(--bdr)}
+.stat .n{font-size:26px;font-weight:800;background:linear-gradient(135deg,var(--acc),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.stat .l{font-size:10px;color:var(--dim);margin-top:2px;text-transform:uppercase;letter-spacing:.8px}
+
+/* ---- Flow ---- */
+.flow{display:flex;align-items:stretch;gap:0;padding:16px 0;overflow-x:auto}
+.fstep{flex:1;min-width:120px;background:var(--s2);border:1px solid var(--bdr);border-radius:10px;padding:14px 10px;text-align:center;transition:.3s}
+.fstep:hover{border-color:var(--acc);transform:translateY(-3px);box-shadow:0 6px 20px var(--glow)}
+.fstep .ic{font-size:22px;margin-bottom:6px}
+.fstep .ti{font-size:12px;font-weight:700;color:var(--bright)}
+.fstep .de{font-size:10px;color:var(--dim);margin-top:3px}
+.farr{display:flex;align-items:center;justify-content:center;min-width:28px;color:var(--acc);font-size:16px;animation:parr 2s ease-in-out infinite}
+@keyframes parr{0%,100%{opacity:.3}50%{opacity:1}}
+
+/* ---- Grid ---- */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+@media(max-width:768px){.g2,.g3{grid-template-columns:1fr}.flow{flex-wrap:wrap;gap:6px}}
+
+/* ---- Mode visibility ---- */
+.ex,.tc{display:none}
+body.mx .ex{display:block}body.mt .tc{display:block}
+body.mx .ex.flex{display:flex}body.mt .tc.flex{display:flex}
+body.mx .ex.grid{display:grid}body.mt .tc.grid{display:grid}
+
+/* ---- Action buttons ---- */
+.btn{padding:10px 20px;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;transition:.3s;color:#fff}
+.btn-primary{background:linear-gradient(135deg,var(--acc),var(--acc2))}
+.btn-primary:hover{box-shadow:0 4px 16px var(--glow);transform:translateY(-1px)}
+.btn-green{background:linear-gradient(135deg,var(--grn-d),var(--grn))}
+.btn-amber{background:linear-gradient(135deg,#92400e,var(--amb))}
+.btn-cyan{background:linear-gradient(135deg,#155e75,var(--cyan))}
+.btn-red{background:linear-gradient(135deg,#991b1b,var(--red))}
+.btn:disabled{opacity:.5;cursor:not-allowed;transform:none!important;box-shadow:none!important}
+.btn-sm{padding:6px 14px;font-size:11px}
+.btn-group{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+
+/* ---- Source selector ---- */
+.source-sel{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+.source-sel select{background:var(--s2);color:var(--txt);border:1px solid var(--bdr);border-radius:8px;padding:8px 14px;font-size:13px;min-width:240px}
+.source-sel select:focus{border-color:var(--acc);outline:none}
+
+/* ---- Result panel ---- */
+.result-panel{background:#0d0f15;border:1px solid var(--bdr);border-radius:10px;padding:16px;margin:12px 0;max-height:500px;overflow-y:auto;font-size:12px;line-height:1.6;white-space:pre-wrap;font-family:'JetBrains Mono',monospace,monospace;color:var(--dim)}
+.result-panel:empty{display:none}
+.result-panel .rkey{color:var(--cyan)}
+.result-panel .rval{color:var(--grn)}
+.result-panel .rnum{color:var(--amb)}
+.result-panel .rerr{color:var(--red)}
+
+/* ---- Log stream ---- */
+.log-stream{background:#080a0e;border:1px solid var(--bdr);border-radius:10px;padding:12px;height:220px;overflow-y:auto;font-size:11px;line-height:1.8;font-family:'JetBrains Mono',monospace,monospace;color:var(--dim)}
+.log-stream .ll-INFO{color:var(--cyan)}
+.log-stream .ll-WARNING{color:var(--amb)}
+.log-stream .ll-ERROR{color:var(--red)}
+.log-stream .lts{color:#475569}
+
+/* ---- Spinner ---- */
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ---- Badge ---- */
+.badge{display:inline-block;padding:2px 8px;border-radius:5px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px}
+.b-grn{background:var(--grn-d);color:var(--grn)}
+.b-amb{background:rgba(245,158,11,.15);color:var(--amb)}
+.b-cyn{background:rgba(6,182,212,.15);color:var(--cyan)}
+.b-red{background:rgba(239,68,68,.15);color:var(--red)}
+.b-vio{background:rgba(139,92,246,.15);color:#a78bfa}
+
+/* ---- Pipeline anim ---- */
+.pipe{position:relative;height:54px;background:var(--s2);border-radius:10px;border:1px solid var(--bdr);margin:12px 0;overflow:hidden}
+.pipe .pk{position:absolute;top:50%;transform:translateY(-50%);width:10px;height:10px;border-radius:50%;animation:fpk 3s linear infinite}
+.pk.p1{background:var(--acc);animation-delay:0s}.pk.p2{background:var(--cyan);animation-delay:1s}.pk.p3{background:var(--grn);animation-delay:2s}
+@keyframes fpk{0%{left:-10px;opacity:0}5%{opacity:1}95%{opacity:1}100%{left:calc(100% + 10px);opacity:0}}
+.pipe .sl{position:absolute;top:6px;font-size:9px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.4px}
+.pipe .sv{position:absolute;top:0;bottom:0;width:1px;background:var(--bdr)}
+
+/* ---- Governance result cards ---- */
+.gov-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:12px 0}
+.gov-card{background:var(--s2);border:1px solid var(--bdr);border-radius:10px;padding:14px;font-size:12px}
+.gov-card .gc-h{font-weight:700;font-size:13px;color:var(--bright);margin-bottom:6px;display:flex;align-items:center;gap:6px}
+.gov-card .gc-v{color:var(--dim)}
+</style>
+</head>
+<body class="mx">
+
+<div class="topbar">
+  <div class="logo">hydra-ingest</div>
+  <div style="display:flex;gap:16px;align-items:center">
+    <div class="conn" id="conn-status"><div class="dot"></div> Connected</div>
+    <div class="mode-sw">
+      <button class="mbtn ax" onclick="setMode('exec')" id="bx">Executive</button>
+      <button class="mbtn" onclick="setMode('tech')" id="bt">Technical</button>
+    </div>
+  </div>
+</div>
+
+<div class="tabs">
+  <button class="tab active" onclick="setPhase('overview')">Overview</button>
+  <div class="tab-arr">▸</div>
+  <button class="tab" onclick="setPhase('control')">Control Panel</button>
+  <div class="tab-arr">▸</div>
+  <button class="tab" onclick="setPhase('observe')">Observe</button>
+</div>
+
+<div class="content">
+
+<!-- ==================== OVERVIEW ==================== -->
+<div class="panel active" id="p-overview">
+  <div class="ex">
+    <div class="card">
+      <h2>Platform at a Glance</h2>
+      <p>An intelligent data pipeline that discovers sources, picks the right engine, and enforces governance — all automatically.</p>
+      <div class="stats" id="exec-stats">
+        <div class="stat"><div class="n" id="s-src">-</div><div class="l">Sources</div></div>
+        <div class="stat"><div class="n" id="s-txf">-</div><div class="l">Transforms</div></div>
+        <div class="stat"><div class="n" id="s-runs">-</div><div class="l">Runs Completed</div></div>
+        <div class="stat"><div class="n">100%</div><div class="l">Config-Driven</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Pipeline Flow</h2>
+      <div class="flow">
+        <div class="fstep"><div class="ic">📡</div><div class="ti">Discover</div><div class="de">Schema &amp; volume</div></div>
+        <div class="farr">→</div>
+        <div class="fstep"><div class="ic">📥</div><div class="ti">Ingest</div><div class="de">API / Stream / Batch</div></div>
+        <div class="farr">→</div>
+        <div class="fstep"><div class="ic">⚡</div><div class="ti">Transform</div><div class="de">Spark or Python</div></div>
+        <div class="farr">→</div>
+        <div class="fstep"><div class="ic">🛡️</div><div class="ti">Govern</div><div class="de">PII + Quality + Lineage</div></div>
+        <div class="farr">→</div>
+        <div class="fstep"><div class="ic">🏗️</div><div class="ti">Store</div><div class="de">S3 / Iceberg</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Business Impact</h2>
+      <div class="g2">
+        <div><h3>🎯 Self-Optimizing</h3><p>Spark for big data, Python for small. Scales to zero when idle. Pay only for what you use.</p></div>
+        <div><h3>🛡️ Governed by Default</h3><p>PII detection, full lineage, quality gates — every ingestion, every time. No manual steps.</p></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tc">
+    <div class="card">
+      <h2>Architecture Overview</h2>
+      <p>The orchestrator consumes commands from a topic router, discovers the source via the context layer, selects the right ingestor and transform engine, stores results in the data lake, and runs governance checks at every step.</p>
+      <div class="stats" id="tech-stats">
+        <div class="stat"><div class="n" id="st-src">-</div><div class="l">Sources</div></div>
+        <div class="stat"><div class="n" id="st-txf">-</div><div class="l">Transforms</div></div>
+        <div class="stat"><div class="n" id="st-runs">-</div><div class="l">Runs</div></div>
+        <div class="stat"><div class="n">14</div><div class="l">Components</div></div>
+        <div class="stat"><div class="n">57</div><div class="l">Tests</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Loaded Configurations</h2>
+      <div class="g2">
+        <div>
+          <h3>Sources</h3>
+          <div id="tech-sources" style="font-size:12px;color:var(--dim)">Loading...</div>
+        </div>
+        <div>
+          <h3>Transforms</h3>
+          <div id="tech-transforms" style="font-size:12px;color:var(--dim)">Loading...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== CONTROL PANEL ==================== -->
+<div class="panel" id="p-control">
+
+  <div class="card">
+    <h2>Launch Pipeline</h2>
+    <p>Select a source and run real operations against live public APIs.</p>
+
+    <div class="source-sel">
+      <select id="src-select"><option value="">Loading sources...</option></select>
+      <span class="badge b-cyn" id="src-type-badge" style="display:none"></span>
+    </div>
+
+    <div class="btn-group">
+      <button class="btn btn-amber" onclick="runDiscover()" id="btn-discover">📡 Discover Source</button>
+      <button class="btn btn-primary" onclick="runIngest()" id="btn-ingest">📥 Ingest + Govern</button>
+    </div>
+
+    <div id="discover-result" class="result-panel"></div>
+    <div id="ingest-result"></div>
+  </div>
+
+  <div class="card">
+    <h2>Run Transform</h2>
+    <p>Execute a transform pipeline against live-fetched data using the Python engine.</p>
+
+    <div class="source-sel">
+      <select id="txf-select"><option value="">Loading transforms...</option></select>
+    </div>
+
+    <div class="btn-group">
+      <button class="btn btn-green btn-sm" onclick="runValidate()" id="btn-validate">✓ Validate DSL</button>
+      <button class="btn btn-cyan" onclick="runTransform()" id="btn-transform">⚡ Execute Transform</button>
+    </div>
+
+    <div id="validate-result" class="result-panel"></div>
+    <div id="transform-result"></div>
+  </div>
+
+  <div class="card">
+    <h2>Live Log Stream</h2>
+    <p>Real-time structured logs from the platform backend.</p>
+    <div class="log-stream" id="log-stream"></div>
+  </div>
+</div>
+
+<!-- ==================== OBSERVE ==================== -->
+<div class="panel" id="p-observe">
+  <div class="card">
+    <h2>Pipeline Activity</h2>
+    <div class="pipe">
+      <div class="pk p1"></div><div class="pk p2"></div><div class="pk p3"></div>
+      <div class="sl" style="left:3%">DISCOVER</div><div class="sv" style="left:20%"></div>
+      <div class="sl" style="left:22%">INGEST</div><div class="sv" style="left:40%"></div>
+      <div class="sl" style="left:42%">CLASSIFY</div><div class="sv" style="left:58%"></div>
+      <div class="sl" style="left:60%">QUALITY</div><div class="sv" style="left:76%"></div>
+      <div class="sl" style="left:78%">LINEAGE</div><div class="sv" style="left:92%"></div>
+      <div class="sl" style="left:93%">✓</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Run History</h2>
+    <div id="run-history" style="font-size:12px;color:var(--dim)">No runs yet. Use the Control Panel to trigger operations.</div>
+  </div>
+
+  <div class="card">
+    <h2>Live Logs</h2>
+    <div class="log-stream" id="log-stream-obs"></div>
+  </div>
+</div>
+
+</div>
+
+<div style="text-align:center;padding:24px;color:var(--dim);font-size:11px;border-top:1px solid var(--bdr);margin-top:32px">
+  hydra-ingest &nbsp;·&nbsp; <a href="https://github.com/efrenatmckinsey/de-agent" style="color:var(--acc2)">github.com/efrenatmckinsey/de-agent</a>
+  &nbsp;·&nbsp; Dashboard served by FastAPI
+</div>
+
+<script>
+const API = '';
+
+let mode = 'exec', phase = 'overview';
+let sources = {}, transforms = {};
+
+function setMode(m) {
+  mode = m;
+  document.body.className = m === 'exec' ? 'mx' : 'mt';
+  document.getElementById('bx').className = m === 'exec' ? 'mbtn ax' : 'mbtn';
+  document.getElementById('bt').className = m === 'tech' ? 'mbtn at' : 'mbtn';
+}
+
+function setPhase(p) {
+  phase = p;
+  document.querySelectorAll('.panel').forEach(el => el.classList.remove('active'));
+  document.getElementById('p-' + p).classList.add('active');
+  document.querySelectorAll('.tab').forEach((t, i) => {
+    t.classList.toggle('active', ['overview','control','observe'][i] === p);
+  });
+}
+
+// ---- Fetch configs ----
+async function loadConfigs() {
+  try {
+    const [srcRes, txfRes, statusRes] = await Promise.all([
+      fetch(API + '/api/sources'), fetch(API + '/api/transforms'), fetch(API + '/api/status')
+    ]);
+    sources = await srcRes.json();
+    transforms = await txfRes.json();
+    const status = await statusRes.json();
+
+    // Populate stats
+    const sc = Object.keys(sources).length, tc = Object.keys(transforms).length;
+    ['s-src','st-src'].forEach(id => { const el = document.getElementById(id); if(el) el.textContent = sc; });
+    ['s-txf','st-txf'].forEach(id => { const el = document.getElementById(id); if(el) el.textContent = tc; });
+    ['s-runs','st-runs'].forEach(id => { const el = document.getElementById(id); if(el) el.textContent = status.total_runs; });
+
+    // Populate source dropdown
+    const sel = document.getElementById('src-select');
+    sel.innerHTML = '';
+    for (const [sid, cfg] of Object.entries(sources)) {
+      const opt = document.createElement('option');
+      opt.value = sid;
+      opt.textContent = `${sid}  (${cfg.type || 'unknown'})`;
+      sel.appendChild(opt);
+    }
+    sel.onchange = () => {
+      const b = document.getElementById('src-type-badge');
+      const cfg = sources[sel.value];
+      if (cfg) { b.textContent = cfg.type; b.style.display = 'inline-block'; }
+      else b.style.display = 'none';
+    };
+    sel.dispatchEvent(new Event('change'));
+
+    // Populate transform dropdown
+    const tsel = document.getElementById('txf-select');
+    tsel.innerHTML = '';
+    for (const [tid, cfg] of Object.entries(transforms)) {
+      const opt = document.createElement('option');
+      opt.value = tid;
+      opt.textContent = `${tid}  (engine: ${cfg.engine_hint || 'auto'})`;
+      tsel.appendChild(opt);
+    }
+
+    // Tech sources list
+    const tsDiv = document.getElementById('tech-sources');
+    if (tsDiv) {
+      tsDiv.innerHTML = Object.entries(sources).map(([sid, cfg]) =>
+        `<div style="margin:4px 0"><span class="badge ${cfg.type==='api'?'b-grn':cfg.type==='stream'?'b-amb':'b-cyn'}">${cfg.type}</span> <strong>${sid}</strong> — ${cfg.connection?.base_url || ''}</div>`
+      ).join('');
+    }
+    const ttDiv = document.getElementById('tech-transforms');
+    if (ttDiv) {
+      ttDiv.innerHTML = Object.entries(transforms).map(([tid, cfg]) =>
+        `<div style="margin:4px 0"><span class="badge b-vio">${cfg.engine_hint || 'auto'}</span> <strong>${tid}</strong> → ${cfg.output?.table || ''} (${(cfg.steps||[]).length} steps)</div>`
+      ).join('');
+    }
+
+    // Render run history
+    renderHistory(status.recent_runs || []);
+
+    document.getElementById('conn-status').innerHTML = '<div class="dot"></div> Connected';
+  } catch (e) {
+    document.getElementById('conn-status').innerHTML = '<div class="dot" style="background:var(--red)"></div> Disconnected';
+    console.error('Failed to load configs:', e);
+  }
+}
+
+// ---- Discover ----
+async function runDiscover() {
+  const sid = document.getElementById('src-select').value;
+  if (!sid) return;
+  const btn = document.getElementById('btn-discover');
+  const out = document.getElementById('discover-result');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Discovering...';
+  out.innerHTML = '';
+
+  try {
+    const res = await fetch(API + `/api/discover/${sid}`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Discovery failed');
+    out.innerHTML = formatDiscovery(data);
+    refreshStatus();
+  } catch (e) {
+    out.innerHTML = `<span class="rerr">Error: ${e.message}</span>`;
+  } finally {
+    btn.disabled = false; btn.innerHTML = '📡 Discover Source';
+  }
+}
+
+function formatDiscovery(d) {
+  let cols = '';
+  if (d.columns && typeof d.columns === 'object') {
+    const entries = Object.entries(d.columns);
+    cols = entries.slice(0, 20).map(([name, meta]) => {
+      const types = (meta.types || []).join(', ');
+      const nullable = meta.nullable ? ' <span style="color:var(--amb)">nullable</span>' : '';
+      return `  <span class="rkey">${name}</span>: <span class="rval">${types}</span>${nullable}`;
+    }).join('\n');
+    if (entries.length > 20) cols += `\n  ... and ${entries.length - 20} more columns`;
+  }
+  return `<span class="rkey">source_id</span>: <span class="rval">${d.source_id}</span>
+<span class="rkey">content_type</span>: <span class="rval">${d.content_type || 'unknown'}</span>
+<span class="rkey">estimated_rows</span>: <span class="rnum">${d.estimated_rows?.toLocaleString()}</span>
+<span class="rkey">sample_size</span>: <span class="rnum">${d.sample_size}</span>
+<span class="rkey">duration</span>: <span class="rnum">${d.duration_ms}ms</span>
+<span class="rkey">etag</span>: <span class="rval">${d.etag || 'none'}</span>
+
+<span class="rkey">inferred_schema</span> (${Object.keys(d.columns || {}).length} columns):
+${cols}`;
+}
+
+// ---- Ingest ----
+async function runIngest() {
+  const sid = document.getElementById('src-select').value;
+  if (!sid) return;
+  const btn = document.getElementById('btn-ingest');
+  const out = document.getElementById('ingest-result');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Ingesting + Governing...';
+  out.innerHTML = '';
+
+  try {
+    const res = await fetch(API + `/api/ingest/${sid}`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Ingestion failed');
+    out.innerHTML = formatIngest(data);
+    refreshStatus();
+  } catch (e) {
+    out.innerHTML = `<div class="result-panel"><span class="rerr">Error: ${e.message}</span></div>`;
+  } finally {
+    btn.disabled = false; btn.innerHTML = '📥 Ingest + Govern';
+  }
+}
+
+function formatIngest(d) {
+  const gov = d.governance || {};
+  const cls = gov.classification || {};
+  const q = gov.quality || {};
+  const lin = gov.lineage || {};
+
+  let sampleHtml = '';
+  if (d.sample_records && d.sample_records.length > 0) {
+    const keys = d.schema_columns.slice(0, 8);
+    sampleHtml = `<div style="overflow-x:auto;margin:8px 0">
+      <table style="width:100%;font-size:11px;border-collapse:collapse;color:var(--dim)">
+        <tr>${keys.map(k => `<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--bdr);color:var(--cyan)">${k}</th>`).join('')}</tr>
+        ${d.sample_records.slice(0,5).map(r => `<tr>${keys.map(k => {
+          let v = r[k]; if (typeof v === 'object') v = JSON.stringify(v).substring(0,40) + '...';
+          if (v === null || v === undefined) v = '<span style="color:var(--dim)">null</span>';
+          else v = String(v).substring(0, 50);
+          return `<td style="padding:3px 8px;border-bottom:1px solid var(--bdr);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${v}</td>`;
+        }).join('')}</tr>`).join('')}
+      </table>
+    </div>`;
+  }
+
+  const qPassed = q.passed_gate;
+  const qBadge = qPassed === true ? '<span class="badge b-grn">PASSED</span>' : qPassed === false ? '<span class="badge b-red">FAILED</span>' : '<span class="badge b-amb">N/A</span>';
+
+  const piiBadge = cls.classification ? `<span class="badge ${cls.classification === 'public' ? 'b-grn' : cls.classification === 'confidential' ? 'b-red' : 'b-amb'}">${cls.classification}</span>` : '';
+
+  const piiFields = cls.pii_fields && Object.keys(cls.pii_fields).length > 0
+    ? Object.entries(cls.pii_fields).map(([col, type]) => `<span class="badge b-red">${col}: ${type}</span>`).join(' ')
+    : '<span style="color:var(--grn)">No PII detected</span>';
+
+  let violations = '';
+  if (q.violations && q.violations.length > 0) {
+    violations = q.violations.map(v =>
+      `<div style="color:var(--red);font-size:11px;margin:2px 0">⚠ ${v.check_type}: ${v.message} (${v.failed_count} rows)</div>`
+    ).join('');
+  }
+
+  return `
+    <div class="card" style="margin-top:12px">
+      <h2>Ingestion Result</h2>
+      <div class="stats">
+        <div class="stat"><div class="n">${d.records_fetched}</div><div class="l">Records</div></div>
+        <div class="stat"><div class="n">${d.duration_ms}ms</div><div class="l">Duration</div></div>
+        <div class="stat"><div class="n">${d.schema_columns?.length || 0}</div><div class="l">Columns</div></div>
+        <div class="stat"><div class="n">${d.source_type}</div><div class="l">Source Type</div></div>
+      </div>
+      ${sampleHtml}
+    </div>
+    <div class="gov-row">
+      <div class="gov-card">
+        <div class="gc-h">🔒 PII Classification ${piiBadge}</div>
+        <div class="gc-v">Scanned ${cls.scanned_rows || 0} rows<br>${piiFields}</div>
+      </div>
+      <div class="gov-card">
+        <div class="gc-h">✓ Quality Gate ${qBadge}</div>
+        <div class="gc-v">${q.checks_run || 0} checks: ${q.checks_passed || 0} passed, ${q.checks_failed || 0} failed<br>Pass rate: ${((q.pass_rate || 0) * 100).toFixed(1)}%</div>
+        ${violations}
+      </div>
+      <div class="gov-card">
+        <div class="gc-h">🗺️ Lineage</div>
+        <div class="gc-v">Run ID: <code style="font-size:10px">${(lin.run_id || '').substring(0, 8)}...</code><br>Events: ${lin.events || 0}</div>
+      </div>
+    </div>`;
+}
+
+// ---- Validate ----
+async function runValidate() {
+  const tid = document.getElementById('txf-select').value;
+  if (!tid) return;
+  const btn = document.getElementById('btn-validate');
+  const out = document.getElementById('validate-result');
+  btn.disabled = true;
+
+  try {
+    const res = await fetch(API + `/api/validate/${tid}`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Validation failed');
+    const icon = data.valid ? '✅' : '⚠️';
+    out.innerHTML = `${icon} <span class="rkey">${data.transform_id}</span>: ${data.steps} steps, engine=<span class="rval">${data.engine_hint}</span>, output=<span class="rval">${data.output_table}</span>` +
+      (data.warnings?.length ? `\n<span class="rerr">Warnings:\n${data.warnings.map(w => '  - ' + w).join('\n')}</span>` : '\n<span style="color:var(--grn)">All steps valid.</span>');
+  } catch (e) {
+    out.innerHTML = `<span class="rerr">Error: ${e.message}</span>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ---- Transform ----
+async function runTransform() {
+  const tid = document.getElementById('txf-select').value;
+  if (!tid) return;
+  const btn = document.getElementById('btn-transform');
+  const out = document.getElementById('transform-result');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Fetching + Transforming...';
+  out.innerHTML = '';
+
+  try {
+    const res = await fetch(API + `/api/transform/${tid}`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Transform failed');
+    out.innerHTML = formatTransform(data);
+    refreshStatus();
+  } catch (e) {
+    out.innerHTML = `<div class="result-panel"><span class="rerr">Error: ${e.message}</span></div>`;
+  } finally {
+    btn.disabled = false; btn.innerHTML = '⚡ Execute Transform';
+  }
+}
+
+function formatTransform(d) {
+  const viol = d.quality_violations?.length ? `<div style="margin-top:8px">${d.quality_violations.map(v =>
+    `<div style="color:var(--amb);font-size:11px">⚠ ${JSON.stringify(v)}</div>`
+  ).join('')}</div>` : '';
+
+  return `<div class="card" style="margin-top:12px">
+    <h2>Transform Result</h2>
+    <div class="stats">
+      <div class="stat"><div class="n">${d.rows_in}</div><div class="l">Rows In</div></div>
+      <div class="stat"><div class="n">${d.rows_out}</div><div class="l">Rows Out</div></div>
+      <div class="stat"><div class="n">${d.actual_engine}</div><div class="l">Engine Used</div></div>
+      <div class="stat"><div class="n">${d.recommended_engine}</div><div class="l">Recommended</div></div>
+      <div class="stat"><div class="n">${d.duration_ms}ms</div><div class="l">Duration</div></div>
+    </div>
+    <div style="margin-top:8px;font-size:12px;color:var(--dim)">
+      Steps: ${d.step_types?.map(s => `<span class="badge b-vio">${s}</span>`).join(' ') || ''}
+    </div>
+    ${viol}
+  </div>`;
+}
+
+// ---- SSE Log Stream ----
+function startLogStream() {
+  const stream1 = document.getElementById('log-stream');
+  const stream2 = document.getElementById('log-stream-obs');
+  const es = new EventSource(API + '/api/stream/logs');
+  es.addEventListener('log', (e) => {
+    try {
+      const d = JSON.parse(e.data);
+      const line = `<div><span class="lts">${d.ts?.substring(11,19) || ''}</span> <span class="ll-${d.level}">[${d.level}]</span> ${escHtml(d.msg)}</div>`;
+      [stream1, stream2].forEach(el => {
+        if (el) {
+          el.innerHTML += line;
+          if (el.children.length > 300) el.removeChild(el.firstChild);
+          el.scrollTop = el.scrollHeight;
+        }
+      });
+    } catch {}
+  });
+  es.onerror = () => {
+    document.getElementById('conn-status').innerHTML = '<div class="dot" style="background:var(--red)"></div> Reconnecting...';
+    setTimeout(() => {
+      document.getElementById('conn-status').innerHTML = '<div class="dot"></div> Connected';
+    }, 3000);
+  };
+}
+
+function escHtml(s) {
+  const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML;
+}
+
+// ---- Status refresh ----
+async function refreshStatus() {
+  try {
+    const res = await fetch(API + '/api/status');
+    const status = await res.json();
+    ['s-runs','st-runs'].forEach(id => { const el = document.getElementById(id); if(el) el.textContent = status.total_runs; });
+    renderHistory(status.recent_runs || []);
+  } catch {}
+}
+
+function renderHistory(runs) {
+  const el = document.getElementById('run-history');
+  if (!el) return;
+  if (!runs.length) { el.innerHTML = 'No runs yet. Use the Control Panel to trigger operations.'; return; }
+  el.innerHTML = runs.reverse().map(r => {
+    const badge = r.type === 'discovery' ? 'b-amb' : r.type === 'ingest' ? 'b-grn' : 'b-vio';
+    const detail = r.type === 'ingest' ? ` — ${r.records} records` + (r.quality?.passed_gate === false ? ' <span class="badge b-red">GATE FAILED</span>' : ' <span class="badge b-grn">GATE OK</span>') :
+                   r.type === 'transform' ? ` — ${r.rows_in}→${r.rows_out} rows` :
+                   r.result ? ` — ${r.result.estimated_rows} est. rows` : '';
+    return `<div style="padding:6px 0;border-bottom:1px solid var(--bdr)">
+      <span class="badge ${badge}">${r.type}</span>
+      <strong>${r.source_id || r.transform_id || ''}</strong>${detail}
+      <span style="float:right;color:var(--dim)">${r.ts?.substring(11,19) || ''}</span>
+    </div>`;
+  }).join('');
+}
+
+// ---- Init ----
+loadConfigs();
+startLogStream();
+setInterval(refreshStatus, 10000);
+</script>
+</body>
+</html>

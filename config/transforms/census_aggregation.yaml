@@ -16,14 +16,16 @@ steps:
     type: rename
     mappings:
       NAME: state_name
-      POP: population
-      DENSITY: pop_density
+      P1_001N: population
+      P1_002N: pop_one_race
+      B19013_001E: median_income
 
   - id: cast_types
     type: cast
     columns:
       population: int
-      pop_density: float
+      pop_one_race: int
+      median_income: int
 
   - id: derive_population_bracket
     type: derive

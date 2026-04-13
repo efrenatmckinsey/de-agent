@@ -94,6 +94,7 @@ class APIIngestor(BaseIngestor):
     """REST-style pull using connection + endpoints (sample slice)."""
 
     async def ingest(self, *, source_config: dict[str, Any], context: SourceContext) -> list[dict[str, Any]]:
+        import os
         import httpx
 
         conn = source_config.get("connection") or {}
@@ -106,9 +107,19 @@ class APIIngestor(BaseIngestor):
         path = str(ep.get("path", "/"))
         url = f"{base}/{path.lstrip('/')}"
         timeout = float(conn.get("timeout_seconds", 60))
+
+        params: dict[str, Any] = {}
+        auth = conn.get("auth") or {}
+        if str(auth.get("type", "")).lower() == "api_key":
+            env_var = auth.get("env_var", "")
+            key_val = os.environ.get(env_var, "") if env_var else ""
+            if key_val:
+                qp = auth.get("query_param", "api_key")
+                params[qp] = key_val
+
         logger.info("api_ingest.fetch", url=url)
         async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.get(url)
+            resp = await client.get(url, params=params or None)
             resp.raise_for_status()
             body = resp.json()
         if isinstance(body, list):
@@ -157,7 +168,20 @@ class StreamIngestor(BaseIngestor):
 class BatchIngestor(BaseIngestor):
     """Batch Census-style pulls over dataset paths declared in YAML."""
 
+    @staticmethod
+    def _census_array_to_dicts(body: list) -> list[dict[str, Any]]:
+        """Census API returns [[header,...], [row,...], ...] — convert to dicts."""
+        if (
+            len(body) >= 2
+            and isinstance(body[0], list)
+            and all(isinstance(h, str) for h in body[0])
+        ):
+            headers = body[0]
+            return [dict(zip(headers, row)) for row in body[1:]]
+        return [{"row": i, "value": v} for i, v in enumerate(body[:500])]
+
     async def ingest(self, *, source_config: dict[str, Any], context: SourceContext) -> list[dict[str, Any]]:
+        import os
         import httpx
 
         conn = source_config.get("connection") or {}
@@ -166,23 +190,43 @@ class BatchIngestor(BaseIngestor):
         if not base or not datasets:
             logger.warning("batch_ingest.skipped", reason="missing_base_or_datasets")
             return []
-        ds = datasets[0]
-        subpath = str(ds.get("path", "")).strip("/")
-        url = f"{base}/{subpath}"
-        params: dict[str, Any] = {}
-        vars_ = ds.get("default_variables")
-        if vars_:
-            params["get"] = ",".join(str(v) for v in vars_)
-        logger.info("batch_ingest.fetch", url=url)
-        async with httpx.AsyncClient(timeout=float(conn.get("timeout_seconds", 120))) as client:
-            resp = await client.get(url, params=params)
-            resp.raise_for_status()
-            body = resp.json()
-        if isinstance(body, list):
-            return [{"row": i, "value": v} for i, v in enumerate(body[:500])]
-        if isinstance(body, dict):
-            return [body]
-        return []
+
+        auth = conn.get("auth") or {}
+        api_key = ""
+        if str(auth.get("type", "")).lower() == "api_key":
+            env_var = auth.get("env_var", "")
+            api_key = os.environ.get(env_var, "") if env_var else ""
+
+        all_rows: list[dict[str, Any]] = []
+        for ds in datasets:
+            subpath = str(ds.get("path", "")).strip("/")
+            url = f"{base}/{subpath}"
+            params: dict[str, Any] = {}
+            vars_ = ds.get("default_variables")
+            if vars_:
+                params["get"] = ",".join(str(v) for v in vars_)
+            extra = ds.get("params") or {}
+            params.update(extra)
+            if api_key:
+                qp = auth.get("query_param", "key")
+                params[qp] = api_key
+
+            logger.info("batch_ingest.fetch", url=url, dataset=ds.get("id"))
+            async with httpx.AsyncClient(timeout=float(conn.get("timeout_seconds", 120))) as client:
+                resp = await client.get(url, params=params)
+                resp.raise_for_status()
+                body = resp.json()
+
+            if isinstance(body, list):
+                rows = self._census_array_to_dicts(body)
+            elif isinstance(body, dict):
+                rows = [body]
+            else:
+                rows = []
+            all_rows.extend(rows)
+            logger.info("batch_ingest.dataset_done", dataset=ds.get("id"), rows=len(rows))
+        logger.info("batch_ingest.done", total_rows=len(all_rows), source_id=source_config.get("source_id"))
+        return all_rows
 
 
 def select_ingestor(source_type: str) -> BaseIngestor:

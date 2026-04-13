@@ -24,14 +24,18 @@ datasets:
     default_variables:
       - NAME
       - P1_001N
-  - id: saipe_poverty_timeseries
-    path: timeseries/poverty/saipe
-    description: "SAIPE model-based poverty estimates (time series)"
+      - P1_002N
+      - P1_003N
+    params:
+      for: "state:*"
+  - id: acs_2022_median_income
+    path: 2022/acs/acs1
+    description: "2022 American Community Survey 1-Year — median household income"
     default_variables:
       - NAME
-      - TIME
-      - SAEMHI_PT
-      - SAEMHI_MOE
+      - B19013_001E
+    params:
+      for: "state:*"
 
 schedule:
   cron: "0 6 1 * *"

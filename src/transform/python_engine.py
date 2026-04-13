@@ -114,18 +114,23 @@ class ExpressionEvaluator:
         left_s, op, right_s = m.group(1).strip(), m.group(2), m.group(3).strip()
         left = self._parse_value(left_s, row)
         right = self._parse_value(right_s, row)
+        if left is None or right is None:
+            return op in ("!=", "<>") and (left is not None or right is not None) if op != "=" else left is right
         if op == "=":
             return left == right
         if op in ("!=", "<>"):
             return left != right
-        if op == ">":
-            return left > right
-        if op == "<":
-            return left < right
-        if op == ">=":
-            return left >= right
-        if op == "<=":
-            return left <= right
+        try:
+            if op == ">":
+                return left > right
+            if op == "<":
+                return left < right
+            if op == ">=":
+                return left >= right
+            if op == "<=":
+                return left <= right
+        except TypeError:
+            return False
         raise TransformError(f"Unsupported operator {op}")
 
     def _row_get(self, row: dict[str, Any], key: str) -> Any:
