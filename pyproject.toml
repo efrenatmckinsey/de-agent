@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=70.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hydra-ingest"
+version = "0.1.0"
+description = "Distributed data ingestion platform with adaptive scaling, governance, and observability"
+requires-python = ">=3.11"
+
+[project.scripts]
+hydra = "src.cli:main"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

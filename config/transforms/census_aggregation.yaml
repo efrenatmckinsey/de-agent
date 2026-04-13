@@ -1,0 +1,59 @@
+# =============================================================================
+# Transform: Census population trends (DSL)
+# =============================================================================
+# Small-footprint pipeline: prefer Python engine; renames, casts, brackets,
+# aggregates, then curated Iceberg with row-count and null gates.
+# =============================================================================
+
+transform_id: census_population_trends
+
+engine_hint: python
+
+source: us_census_population
+
+steps:
+  - id: rename_census_columns
+    type: rename
+    mappings:
+      NAME: state_name
+      POP: population
+      DENSITY: pop_density
+
+  - id: cast_types
+    type: cast
+    columns:
+      population: int
+      pop_density: float
+
+  - id: derive_population_bracket
+    type: derive
+    new_column: population_bracket
+    expression: "CASE WHEN population > 10000000 THEN 'large' WHEN population > 1000000 THEN 'medium' ELSE 'small' END"
+
+  - id: aggregate_by_bracket
+    type: aggregate
+    group_by:
+      - population_bracket
+    measures:
+      - column: population
+        function: sum
+        alias: total_pop
+      - column: state_name
+        function: count
+        alias: state_count
+
+  - id: final_quality_gate
+    type: quality_gate
+    checks:
+      - type: not_null
+        columns:
+          - population_bracket
+          - total_pop
+      - type: row_count
+        min: 1
+
+output:
+  table: curated.census_trends
+  format: iceberg
+  partition_by:
+    - year

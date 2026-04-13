@@ -1,0 +1,56 @@
+# =============================================================================
+# Source: NOAA weather (stream-style ingestion)
+# =============================================================================
+# Production pattern: Server-Sent Events or similar push streams.
+# This profile targets api.weather.gov with a simulated poll loop over fixed
+# stations for local/dev parity when a true SSE client is not available.
+# =============================================================================
+
+source_id: noaa_weather_stream
+type: stream
+
+connection:
+  base_url: https://api.weather.gov
+  protocol: sse
+  reconnect_interval: 30s
+  user_agent: hydra-ingest/1.0 (data-pipeline; contact@example.com)
+  headers:
+    Accept: application/geo+json
+
+endpoints:
+  - name: active_alerts_sse
+    path: /alerts/active
+    method: GET
+    stream: true
+    description: "Nationwide active alerts; intended as SSE stream"
+  - name: station_latest_observation
+    path: /stations/{station_id}/observations/latest
+    method: GET
+    path_params:
+      - station_id
+    description: "Latest observation for a given station ID"
+
+# Simulated streaming: poll REST on an interval (dev / fallback mode)
+simulated_stream:
+  enabled: true
+  poll_interval_seconds: 10
+  stations:
+    - KNYC
+    - KLAX
+    - KORD
+
+governance:
+  classification: public
+  retention_days: 90
+
+quality_checks:
+  - type: non_null
+    fields:
+      - temperature
+      - timestamp
+      - station_id
+  - type: valid_range
+    field: temperature
+    min: -60
+    max: 60
+    unit: celsius

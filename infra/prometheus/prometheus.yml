@@ -1,0 +1,25 @@
+# Prometheus scrape configuration for local hydra-ingest development (docker-compose).
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Worker metrics (Prometheus client default port — align with your app).
+  - job_name: hydra-worker
+    static_configs:
+      - targets: ["hydra-worker:8000"]
+        labels:
+          service: hydra-worker
+
+  # Spark master UI exposes metrics on a separate port in some images; adjust if enabled.
+  - job_name: spark-master
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["spark-master:8080"]
+        labels:
+          service: spark-master
+
+  # Prometheus self-monitoring (optional).
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

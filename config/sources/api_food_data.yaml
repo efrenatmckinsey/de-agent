@@ -1,0 +1,70 @@
+# =============================================================================
+# Source: USDA FoodData Central (REST API)
+# =============================================================================
+# Fetches food and nutrient data from api.nal.usda.gov for lake ingestion.
+# Requires USDA_API_KEY in the runtime environment.
+# =============================================================================
+
+source_id: usda_food_data
+type: api
+
+connection:
+  base_url: https://api.nal.usda.gov/fdc/v1
+  auth:
+    type: api_key
+    # Resolved at runtime; never commit secrets to YAML
+    env_var: USDA_API_KEY
+    # FDC accepts api_key as query param or x-api-key header; query is common in examples
+    query_param: api_key
+  rate_limit:
+    requests_per_second: 5
+    burst: 10
+  timeout_seconds: 60
+
+# REST endpoints used by the connector (paths relative to base_url)
+endpoints:
+  - name: foods_search
+    path: /foods/search
+    method: GET
+    params:
+      - query
+      - pageSize
+    description: "Search foods by keyword; primary entry for bulk pulls"
+  - name: food_detail
+    path: /food/{fdc_id}
+    method: GET
+    path_params:
+      - fdc_id
+    description: "Single food record by FDC ID"
+
+# When hydra-ingest should pull this source
+schedule:
+  cron: "0 2 * * *"
+  timezone: America/New_York
+
+# Hints for discovery / pagination handling
+discovery:
+  response_format: json
+  pagination:
+    type: offset
+    page_size_param: pageSize
+    page_param: pageNumber
+    # USDA returns totalHits; connector can use for page bounds
+    total_field: totalHits
+
+governance:
+  classification: public
+  pii_fields: none
+  retention_days: 365
+
+# Lightweight validations post-fetch (pre-land in raw zone)
+quality_checks:
+  - type: non_null
+    fields:
+      - fdcId
+      - description
+  - type: valid_range
+    field: nutrients.value
+    min: 0
+    max: 100000
+    description: "Nutrient amounts should be non-negative and within plausible upper bound"

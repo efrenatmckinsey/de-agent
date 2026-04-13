@@ -1,0 +1,55 @@
+# =============================================================================
+# Source: US Census Bureau (batch / API pulls)
+# =============================================================================
+# Decennial and SAIPE poverty time series for population analytics.
+# Requires CENSUS_API_KEY in the runtime environment for higher rate limits.
+# =============================================================================
+
+source_id: us_census_population
+type: batch
+
+connection:
+  base_url: https://api.census.gov/data
+  auth:
+    type: api_key
+    env_var: CENSUS_API_KEY
+    query_param: key
+  timeout_seconds: 120
+
+# Logical datasets the batch job materializes (paths under Census API)
+datasets:
+  - id: decennial_2020_pl
+    path: 2020/dec/pl
+    description: "2020 Decennial Census — population and housing (PL 94-171)"
+    default_variables:
+      - NAME
+      - P1_001N
+  - id: saipe_poverty_timeseries
+    path: timeseries/poverty/saipe
+    description: "SAIPE model-based poverty estimates (time series)"
+    default_variables:
+      - NAME
+      - TIME
+      - SAEMHI_PT
+      - SAEMHI_MOE
+
+schedule:
+  cron: "0 6 1 * *"
+  timezone: America/New_York
+
+file_format: json
+
+governance:
+  classification: public
+  pii_fields: none
+  retention_days: 730
+
+quality_checks:
+  - type: non_null
+    fields:
+      - state
+      - population
+  - type: unique_key
+    columns:
+      - state
+      - year

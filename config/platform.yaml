@@ -1,0 +1,129 @@
+# =============================================================================
+# hydra-ingest — Platform configuration
+# =============================================================================
+# Central settings for the distributed ingestion platform: routing, discovery,
+# scaling, lake storage (S3 + Iceberg), governance, and observability.
+# =============================================================================
+
+platform:
+  # ---------------------------------------------------------------------------
+  # Identity & deployment context
+  # ---------------------------------------------------------------------------
+  name: hydra-ingest
+  version: "1.0.0"
+  # Typical values: dev | staging | prod
+  environment: dev
+
+# -----------------------------------------------------------------------------
+# Topic router — command/control plane over Kafka
+# -----------------------------------------------------------------------------
+# Workers subscribe to ingestion commands; producers publish source run requests.
+topic_router:
+  kafka:
+    # Local development broker (single-node or docker-compose)
+    local:
+      bootstrap_servers: "localhost:9092"
+      security_protocol: PLAINTEXT
+    # AWS MSK — replace placeholder with your cluster bootstrap string(s)
+    aws:
+      bootstrap_servers: "b-1.hydra-msk-placeholder.c1.kafka.us-east-1.amazonaws.com:9098,b-2.hydra-msk-placeholder.c1.kafka.us-east-1.amazonaws.com:9098"
+      security_protocol: SASL_SSL
+      sasl_mechanism: AWS_MSK_IAM
+  # Single topic for ingestion orchestration (partition by source_id if needed)
+  topic: hydra.ingestion.commands
+  consumer_group: hydra-ingest-workers
+
+# -----------------------------------------------------------------------------
+# Context layer — endpoint discovery & schema reflection
+# -----------------------------------------------------------------------------
+# Discovery probes sources before runs; reflection samples payloads for typing.
+context_layer:
+  discovery:
+    timeout_seconds: 45
+    max_retries: 3
+    # Cache successful discovery results to avoid hammering fragile APIs
+    cache_ttl_seconds: 3600
+  reflection:
+    # Rows sampled per endpoint for heuristic schema inference
+    sample_size: 500
+    schema_inference:
+      enabled: true
+      # Coerce ambiguous numerics/strings when confidence is high
+      infer_strings_as_dates: false
+
+# -----------------------------------------------------------------------------
+# Autoscaler — replica bounds and signal-based scaling
+# -----------------------------------------------------------------------------
+autoscaler:
+  min_replicas: 1
+  max_replicas: 20
+  scale_up:
+    cpu_percent_threshold: 75
+    memory_percent_threshold: 80
+    queue_depth_threshold: 500
+  scale_down:
+    cpu_percent_threshold: 35
+    memory_percent_threshold: 45
+    queue_depth_threshold: 50
+  # Minimum time between scale events to prevent thrashing
+  cooldown_seconds: 120
+  # Scale to zero (or min) when idle beyond this window (optional cost control)
+  idle_shutdown_minutes: 45
+
+# -----------------------------------------------------------------------------
+# Storage — S3 zones and Iceberg catalog
+# -----------------------------------------------------------------------------
+storage:
+  s3:
+    bucket: hydra-data-lake
+    region: us-east-1
+    # Layout: zone/source_id/ingestion_date=.../part files
+    base_paths:
+      raw: s3://hydra-data-lake/raw
+      curated: s3://hydra-data-lake/curated
+      governed: s3://hydra-data-lake/governed
+  iceberg:
+    catalog:
+      type: glue
+      warehouse: s3://hydra-data-lake/iceberg
+    # Applied when writers omit explicit partitioning
+    default_partition_columns:
+      - ingestion_date
+      - source_id
+
+# -----------------------------------------------------------------------------
+# Governance — defaults applied when source configs omit overrides
+# -----------------------------------------------------------------------------
+governance:
+  classification_enabled: true
+  pii_detection: true
+  retention_policy:
+    default_days: 365
+    legal_hold_override: false
+  quality_gate:
+    fail_on_critical: true
+    warn_threshold: 0.95
+
+# -----------------------------------------------------------------------------
+# Observability — metrics, traces, structured logs
+# -----------------------------------------------------------------------------
+observability:
+  metrics:
+    enabled: true
+    exporter: prometheus
+    prometheus:
+      bind_address: "0.0.0.0"
+      port: 9090
+      path: /metrics
+  tracing:
+    enabled: true
+    exporter: otlp
+    # Point at your collector (e.g. OpenTelemetry Collector, Grafana Agent)
+    otlp_endpoint: "http://localhost:4317"
+    service_name: hydra-ingest
+    sample_ratio: 0.1
+  logging:
+    level: INFO
+    format: structured
+    # JSON for log aggregation (CloudWatch, Loki, etc.)
+    structured_encoding: json

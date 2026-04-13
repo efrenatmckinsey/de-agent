@@ -1,0 +1,192 @@
+# -----------------------------------------------------------------------------
+# hydra-ingest — Kubernetes reference manifests
+#
+# Apply: kubectl apply -f infra/k8s/deployment.yaml
+#
+# Prerequisites:
+#   - Replace the image with your registry (ECR, GCR, etc.).
+#   - For HPA custom metric "queue_depth", install a metrics adapter (e.g. Prometheus
+#     Adapter) that exposes that metric for pods; otherwise remove the Pods metric block.
+# -----------------------------------------------------------------------------
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hydra-ingest
+  labels:
+    app.kubernetes.io/name: hydra-ingest
+    app.kubernetes.io/part-of: hydra-ingest
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hydra-config
+  namespace: hydra-ingest
+  labels:
+    app.kubernetes.io/name: hydra-worker
+data:
+  # Platform wiring — override per environment.
+  LOG_LEVEL: "info"
+  METRICS_PORT: "8000"
+  KAFKA_BOOTSTRAP_SERVERS: "kafka.hydra-ingest.svc.cluster.local:9092"
+  S3_ENDPOINT_URL: "" # Empty = real AWS S3; set for MinIO/LocalStack in dev.
+  HYDRA_CONFIG_PATH: "/app/config/platform.yaml"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: hydra-secrets
+  namespace: hydra-ingest
+  labels:
+    app.kubernetes.io/name: hydra-worker
+type: Opaque
+stringData:
+  # Replace with real credentials via Sealed Secrets, External Secrets, or CSI driver.
+  AWS_ACCESS_KEY_ID: "CHANGEME"
+  AWS_SECRET_ACCESS_KEY: "CHANGEME"
+  USDA_API_KEY: ""
+  CENSUS_API_KEY: ""
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hydra-worker
+  namespace: hydra-ingest
+  labels:
+    app.kubernetes.io/name: hydra-worker
+    app.kubernetes.io/component: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hydra-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hydra-worker
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+    spec:
+      serviceAccountName: default
+      containers:
+        - name: hydra-worker
+          # TODO: push your image to ECR/GHCR and reference it here.
+          image: 000000000000.dkr.ecr.us-east-1.amazonaws.com/hydra-ingest-dev-worker:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: metrics
+              containerPort: 8000
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: hydra-config
+            - secretRef:
+                name: hydra-secrets
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          # When the worker calls MetricsRecorder.start_server(METRICS_PORT), add:
+          #   readinessProbe/livenessProbe httpGet path /metrics port metrics
+          # Until a dedicated worker entrypoint exists, keep the pod alive (matches Dockerfile default).
+          command: ["sleep", "infinity"]
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hydra-metrics
+  namespace: hydra-ingest
+  labels:
+    app.kubernetes.io/name: hydra-worker
+spec:
+  selector:
+    app.kubernetes.io/name: hydra-worker
+  ports:
+    - name: metrics
+      port: 8000
+      targetPort: metrics
+      protocol: TCP
+
+---
+# Requires metrics.k8s.io/v1beta1 (metrics-server) for CPU/memory.
+# Custom metric queue_depth requires an adapter that registers pods/http_custom_metric or equivalent.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: hydra-worker
+  namespace: hydra-ingest
+  labels:
+    app.kubernetes.io/name: hydra-worker
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: hydra-worker
+  minReplicas: 1
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+    - type: Pods
+      pods:
+        metric:
+          name: queue_depth
+        target:
+          type: AverageValue
+          averageValue: "10"
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: hydra-batch-scheduler
+  namespace: hydra-ingest
+  labels:
+    app.kubernetes.io/name: hydra-batch-scheduler
+spec:
+  # Daily at 02:00 UTC — batch census-style public API snapshot (demo).
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: hydra-batch-scheduler
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: batch
+              image: 000000000000.dkr.ecr.us-east-1.amazonaws.com/hydra-ingest-dev-worker:latest
+              imagePullPolicy: IfNotPresent
+              workingDir: /app
+              envFrom:
+                - configMapRef:
+                    name: hydra-config
+                - secretRef:
+                    name: hydra-secrets
+              command:
+                - python
+                - -m
+                - src.endpoints.census_batch

@@ -1,0 +1,154 @@
+# Local development runtime for hydra-ingest: messaging, object storage, Spark, and observability.
+# Usage (from repo root): docker compose -f infra/docker-compose.yaml up --build
+#
+# Services on the host:
+#   Kafka: localhost:9092  |  MinIO S3 API: localhost:9000, Console: localhost:9001
+#   Spark UI: localhost:8080  |  Prometheus: localhost:9090  |  Grafana: localhost:3000
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    container_name: hydra-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zk-data:/var/lib/zookeeper/data
+      - zk-log:/var/lib/zookeeper/log
+    networks:
+      - hydra-net
+    restart: unless-stopped
+
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    container_name: hydra-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      # Host clients use 9092; containers on hydra-net use 29092 (avoids advertised listener mismatch).
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - hydra-net
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    container_name: hydra-minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: hydra
+      MINIO_ROOT_PASSWORD: hydra-hydra-change-me
+    volumes:
+      - minio-data:/data
+    networks:
+      - hydra-net
+    restart: unless-stopped
+
+  spark-master:
+    image: bitnami/spark:latest
+    container_name: hydra-spark-master
+    environment:
+      SPARK_MODE: master
+      SPARK_RPC_AUTHENTICATION_ENABLED: "no"
+      SPARK_RPC_ENCRYPTION_ENABLED: "no"
+      SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED: "no"
+      SPARK_SSL_ENABLED: "no"
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    networks:
+      - hydra-net
+    restart: unless-stopped
+
+  spark-worker:
+    image: bitnami/spark:latest
+    container_name: hydra-spark-worker
+    depends_on:
+      - spark-master
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_WORKER_MEMORY: 2G
+      SPARK_WORKER_CORES: "2"
+      SPARK_RPC_AUTHENTICATION_ENABLED: "no"
+      SPARK_RPC_ENCRYPTION_ENABLED: "no"
+      SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED: "no"
+      SPARK_SSL_ENABLED: "no"
+    networks:
+      - hydra-net
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: hydra-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    networks:
+      - hydra-net
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: hydra-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    networks:
+      - hydra-net
+    restart: unless-stopped
+
+  hydra-worker:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: hydra-ingest-worker:local
+    container_name: hydra-worker
+    depends_on:
+      - kafka
+      - minio
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      # MinIO S3-compatible API (path-style; set in application as needed).
+      AWS_ACCESS_KEY_ID: hydra
+      AWS_SECRET_ACCESS_KEY: hydra-hydra-change-me
+      AWS_ENDPOINT_URL: http://minio:9000
+      AWS_DEFAULT_REGION: us-east-1
+    networks:
+      - hydra-net
+    restart: unless-stopped
+
+volumes:
+  zk-data:
+  zk-log:
+  kafka-data:
+  minio-data:
+
+networks:
+  hydra-net:
+    name: hydra-net
+    driver: bridge

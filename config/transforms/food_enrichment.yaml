@@ -1,0 +1,62 @@
+# =============================================================================
+# Transform: Food nutrient enrichment (DSL)
+# =============================================================================
+# Enriches USDA food payloads: flatten nutrients, aggregate by category,
+# derive density, then land curated Iceberg with quality gates.
+# =============================================================================
+
+transform_id: food_nutrient_enrichment
+
+# auto → planner chooses Spark vs Python from estimated row volume
+engine_hint: auto
+volume_threshold: 100000
+
+source: usda_food_data
+
+steps:
+  - id: filter_non_null_nutrients
+    type: filter
+    where: "nutrients IS NOT NULL"
+
+  - id: flatten_nutrients
+    type: flatten
+    column: nutrients
+    into:
+      - nutrient_name
+      - nutrient_value
+      - unit
+
+  - id: aggregate_by_category
+    type: aggregate
+    group_by:
+      - food_category
+    measures:
+      - column: nutrient_value
+        function: avg
+        alias: avg_nutrient
+      - column: nutrient_value
+        function: max
+        alias: max_nutrient
+
+  - id: derive_nutrient_density
+    type: derive
+    new_column: nutrient_density
+    expression: "avg_nutrient / serving_size"
+
+  - id: final_quality_gate
+    type: quality_gate
+    checks:
+      - type: not_null
+        columns:
+          - food_category
+          - avg_nutrient
+      - type: valid_range
+        column: nutrient_density
+        min: 0
+        max: 10000
+
+output:
+  table: curated.food_nutrients
+  format: iceberg
+  partition_by:
+    - food_category
