@@ -1,0 +1,1183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>hydra-ingest — Platform Walkthrough</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #232734;
+    --border: #2e3348;
+    --accent: #6366f1;
+    --accent2: #818cf8;
+    --accent-glow: rgba(99,102,241,0.25);
+    --green: #22c55e;
+    --green-dim: #166534;
+    --amber: #f59e0b;
+    --red: #ef4444;
+    --cyan: #06b6d4;
+    --text: #e2e8f0;
+    --text-dim: #94a3b8;
+    --text-bright: #f8fafc;
+    --exec-accent: #8b5cf6;
+    --tech-accent: #06b6d4;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  /* ---- Top bar ---- */
+  .topbar {
+    position: sticky; top: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 32px;
+    background: rgba(15,17,23,0.92);
+    backdrop-filter: blur(16px);
+    border-bottom: 1px solid var(--border);
+  }
+  .topbar .logo {
+    font-size: 18px; font-weight: 700; letter-spacing: -0.5px;
+    background: linear-gradient(135deg, var(--accent), var(--cyan));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .mode-switch {
+    display: flex; gap: 4px;
+    background: var(--surface); border-radius: 10px; padding: 4px;
+    border: 1px solid var(--border);
+  }
+  .mode-btn {
+    padding: 8px 20px; border-radius: 8px; border: none;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+    transition: all 0.3s; color: var(--text-dim); background: transparent;
+  }
+  .mode-btn.active-exec {
+    background: linear-gradient(135deg, var(--exec-accent), #a78bfa);
+    color: white; box-shadow: 0 2px 12px rgba(139,92,246,0.3);
+  }
+  .mode-btn.active-tech {
+    background: linear-gradient(135deg, var(--tech-accent), #22d3ee);
+    color: white; box-shadow: 0 2px 12px rgba(6,182,212,0.3);
+  }
+  .mode-btn:hover:not(.active-exec):not(.active-tech) {
+    color: var(--text); background: var(--surface2);
+  }
+
+  /* ---- Phase navigation ---- */
+  .phase-nav {
+    display: flex; justify-content: center; gap: 0;
+    padding: 24px 32px 0;
+  }
+  .phase-tab {
+    position: relative;
+    padding: 12px 32px; border: none; background: none;
+    color: var(--text-dim); font-size: 14px; font-weight: 600;
+    cursor: pointer; transition: all 0.3s;
+  }
+  .phase-tab::after {
+    content: ''; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
+    width: 0; height: 3px; border-radius: 2px;
+    background: var(--accent); transition: width 0.3s;
+  }
+  .phase-tab.active { color: var(--text-bright); }
+  .phase-tab.active::after { width: 60%; }
+  .phase-tab:hover { color: var(--text); }
+  .phase-connector {
+    display: flex; align-items: center; color: var(--border); font-size: 18px;
+    padding: 0 4px;
+  }
+
+  /* ---- Content ---- */
+  .content { max-width: 1200px; margin: 0 auto; padding: 32px; }
+  .phase-panel { display: none; animation: fadeUp 0.5s ease; }
+  .phase-panel.active { display: block; }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ---- Cards ---- */
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 16px; padding: 28px; margin-bottom: 24px;
+    transition: border-color 0.3s, box-shadow 0.3s;
+  }
+  .card:hover {
+    border-color: var(--accent);
+    box-shadow: 0 0 30px var(--accent-glow);
+  }
+  .card h2 {
+    font-size: 22px; font-weight: 700; margin-bottom: 8px;
+    color: var(--text-bright);
+  }
+  .card h3 {
+    font-size: 16px; font-weight: 600; margin: 16px 0 8px;
+    color: var(--accent2);
+  }
+  .card p { color: var(--text-dim); margin-bottom: 12px; }
+  .card ul { padding-left: 20px; color: var(--text-dim); }
+  .card li { margin-bottom: 6px; }
+  .card code {
+    background: var(--surface2); padding: 2px 6px; border-radius: 4px;
+    font-size: 13px; color: var(--cyan);
+  }
+
+  /* ---- Stat row (exec) ---- */
+  .stat-row {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px; margin: 20px 0;
+  }
+  .stat-box {
+    background: var(--surface2); border-radius: 12px;
+    padding: 20px; text-align: center;
+    border: 1px solid var(--border);
+  }
+  .stat-box .num {
+    font-size: 32px; font-weight: 800;
+    background: linear-gradient(135deg, var(--accent), var(--cyan));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .stat-box .label { font-size: 12px; color: var(--text-dim); margin-top: 4px; text-transform: uppercase; letter-spacing: 1px; }
+
+  /* ---- Flow diagrams ---- */
+  .flow-diagram {
+    position: relative;
+    display: flex; align-items: stretch; gap: 0;
+    padding: 24px 0; overflow-x: auto;
+  }
+  .flow-step {
+    flex: 1; min-width: 160px; position: relative;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 12px; padding: 18px 14px; text-align: center;
+    transition: all 0.3s; cursor: default;
+  }
+  .flow-step:hover {
+    border-color: var(--accent); transform: translateY(-4px);
+    box-shadow: 0 8px 24px var(--accent-glow);
+  }
+  .flow-step .icon { font-size: 28px; margin-bottom: 8px; }
+  .flow-step .title { font-size: 13px; font-weight: 700; color: var(--text-bright); }
+  .flow-step .desc { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+  .flow-arrow {
+    display: flex; align-items: center; justify-content: center;
+    min-width: 36px; color: var(--accent); font-size: 20px;
+    animation: pulse-arrow 2s ease-in-out infinite;
+  }
+  @keyframes pulse-arrow {
+    0%, 100% { opacity: 0.4; } 50% { opacity: 1; }
+  }
+
+  /* ---- Code block ---- */
+  pre.code-block {
+    background: #0d0f15; border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px 20px;
+    overflow-x: auto; font-size: 13px; line-height: 1.7;
+    color: var(--text-dim); margin: 12px 0;
+  }
+  pre.code-block .kw { color: #c084fc; }
+  pre.code-block .fn { color: #67e8f9; }
+  pre.code-block .str { color: #86efac; }
+  pre.code-block .cmt { color: #475569; font-style: italic; }
+  pre.code-block .num { color: #fbbf24; }
+
+  /* ---- Architecture SVG ---- */
+  .arch-svg-wrap {
+    background: var(--surface2); border-radius: 14px;
+    border: 1px solid var(--border); padding: 24px;
+    margin: 16px 0; overflow-x: auto;
+  }
+  .arch-svg-wrap svg { width: 100%; height: auto; }
+
+  /* ---- Expandable section ---- */
+  .expandable { margin: 8px 0; }
+  .expand-header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 16px; cursor: pointer;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 10px; transition: all 0.3s;
+    color: var(--text); font-weight: 600; font-size: 14px;
+  }
+  .expand-header:hover { border-color: var(--accent); }
+  .expand-chevron {
+    transition: transform 0.3s; font-size: 12px; color: var(--text-dim);
+  }
+  .expandable.open .expand-chevron { transform: rotate(90deg); }
+  .expand-body {
+    max-height: 0; overflow: hidden;
+    transition: max-height 0.4s ease, padding 0.3s;
+    padding: 0 16px;
+  }
+  .expandable.open .expand-body {
+    max-height: 2000px; padding: 16px;
+  }
+
+  /* ---- Pipeline animation ---- */
+  .pipeline-anim {
+    position: relative; height: 80px;
+    background: var(--surface2); border-radius: 12px;
+    border: 1px solid var(--border); margin: 16px 0;
+    overflow: hidden;
+  }
+  .pipeline-anim .packet {
+    position: absolute; top: 50%; transform: translateY(-50%);
+    width: 12px; height: 12px; border-radius: 50%;
+    animation: flow-packet 3s linear infinite;
+  }
+  .pipeline-anim .packet.p1 { background: var(--accent); animation-delay: 0s; }
+  .pipeline-anim .packet.p2 { background: var(--cyan); animation-delay: 1s; }
+  .pipeline-anim .packet.p3 { background: var(--green); animation-delay: 2s; }
+  @keyframes flow-packet {
+    0% { left: -12px; opacity: 0; }
+    5% { opacity: 1; }
+    95% { opacity: 1; }
+    100% { left: calc(100% + 12px); opacity: 0; }
+  }
+  .pipeline-anim .stage-label {
+    position: absolute; top: 8px; font-size: 10px; font-weight: 600;
+    color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .pipeline-anim .stage-line {
+    position: absolute; top: 0; bottom: 0; width: 1px;
+    background: var(--border);
+  }
+
+  /* ---- Badge ---- */
+  .badge {
+    display: inline-block; padding: 3px 10px;
+    border-radius: 6px; font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .badge-green { background: var(--green-dim); color: var(--green); }
+  .badge-amber { background: rgba(245,158,11,0.15); color: var(--amber); }
+  .badge-cyan { background: rgba(6,182,212,0.15); color: var(--cyan); }
+
+  /* ---- Grid layout ---- */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 768px) {
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    .flow-diagram { flex-wrap: wrap; gap: 8px; }
+    .flow-arrow { transform: rotate(90deg); min-width: 0; min-height: 24px; }
+  }
+
+  /* ---- Visibility toggle ---- */
+  .exec-only, .tech-only { display: none; }
+  body.mode-exec .exec-only { display: block; }
+  body.mode-tech .tech-only { display: block; }
+  body.mode-exec .exec-only.flex { display: flex; }
+  body.mode-tech .tech-only.flex { display: flex; }
+  body.mode-exec .exec-only.grid { display: grid; }
+  body.mode-tech .tech-only.grid { display: grid; }
+
+  /* ---- Tooltip ---- */
+  .tip {
+    position: relative; cursor: help;
+    border-bottom: 1px dotted var(--text-dim);
+  }
+  .tip .tiptext {
+    visibility: hidden; opacity: 0;
+    position: absolute; bottom: 120%; left: 50%; transform: translateX(-50%);
+    background: var(--surface); border: 1px solid var(--accent);
+    border-radius: 8px; padding: 8px 12px;
+    font-size: 12px; color: var(--text); white-space: nowrap;
+    transition: opacity 0.2s; z-index: 10;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  }
+  .tip:hover .tiptext { visibility: visible; opacity: 1; }
+
+  /* ---- Section subtitle ---- */
+  .section-sub {
+    font-size: 13px; color: var(--text-dim); margin-bottom: 20px;
+    padding-bottom: 12px; border-bottom: 1px solid var(--border);
+  }
+
+  /* ---- Hero ---- */
+  .hero {
+    text-align: center; padding: 48px 20px 32px;
+  }
+  .hero h1 {
+    font-size: 40px; font-weight: 800; letter-spacing: -1px;
+    background: linear-gradient(135deg, var(--accent), var(--cyan), var(--green));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    margin-bottom: 12px;
+  }
+  .hero .subtitle {
+    font-size: 16px; color: var(--text-dim); max-width: 600px; margin: 0 auto;
+  }
+
+  .component-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px; margin: 16px 0;
+  }
+  .component-card {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 12px; padding: 18px;
+    transition: all 0.3s;
+  }
+  .component-card:hover {
+    border-color: var(--accent);
+    box-shadow: 0 4px 20px var(--accent-glow);
+  }
+  .component-card .cc-title {
+    font-weight: 700; font-size: 14px; color: var(--text-bright);
+    margin-bottom: 6px; display: flex; align-items: center; gap: 8px;
+  }
+  .component-card .cc-desc { font-size: 12px; color: var(--text-dim); }
+  .component-card .cc-file { font-size: 11px; color: var(--cyan); margin-top: 6px; font-family: monospace; }
+</style>
+</head>
+<body class="mode-exec">
+
+<!-- ===== TOP BAR ===== -->
+<div class="topbar">
+  <div class="logo">hydra-ingest</div>
+  <div class="mode-switch">
+    <button class="mode-btn active-exec" onclick="setMode('exec')" id="btn-exec">
+      Executive Overview
+    </button>
+    <button class="mode-btn" onclick="setMode('tech')" id="btn-tech">
+      Technical Walkthrough
+    </button>
+  </div>
+</div>
+
+<!-- ===== HERO ===== -->
+<div class="hero">
+  <h1>DE Agent Platform</h1>
+  <div class="subtitle exec-only">Automated, self-scaling data ingestion — from any source to your data lake, with governance built in.</div>
+  <div class="subtitle tech-only">Distributed ingestion runtime with adaptive Spark/Python engine selection, topic-routed orchestration, and embedded governance.</div>
+</div>
+
+<!-- ===== PHASE TABS ===== -->
+<div class="phase-nav">
+  <button class="phase-tab active" onclick="setPhase('setup')">1 &nbsp;Setup</button>
+  <div class="phase-connector">▸</div>
+  <button class="phase-tab" onclick="setPhase('arch')">2 &nbsp;Architecture</button>
+  <div class="phase-connector">▸</div>
+  <button class="phase-tab" onclick="setPhase('exec')">3 &nbsp;Execution</button>
+</div>
+
+<div class="content">
+
+<!-- ============================================================ -->
+<!-- PHASE 1: SETUP                                                -->
+<!-- ============================================================ -->
+<div class="phase-panel active" id="panel-setup">
+
+  <!-- EXEC: Setup -->
+  <div class="exec-only">
+    <div class="card">
+      <h2>One-Command Deployment</h2>
+      <p>The platform runs locally for development and testing, then deploys to AWS with the same configuration files — no code changes required.</p>
+
+      <div class="stat-row">
+        <div class="stat-box">
+          <div class="num">3</div>
+          <div class="label">Config Files to Customize</div>
+        </div>
+        <div class="stat-box">
+          <div class="num">&lt; 5 min</div>
+          <div class="label">Local Setup Time</div>
+        </div>
+        <div class="stat-box">
+          <div class="num">0</div>
+          <div class="label">Vendor Lock-In</div>
+        </div>
+        <div class="stat-box">
+          <div class="num">100%</div>
+          <div class="label">Config-Driven</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Setup Flow</h2>
+      <div class="flow-diagram">
+        <div class="flow-step">
+          <div class="icon">📦</div>
+          <div class="title">Install</div>
+          <div class="desc">Python + dependencies</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <div class="icon">⚙️</div>
+          <div class="title">Configure</div>
+          <div class="desc">YAML source & transform definitions</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <div class="icon">🐳</div>
+          <div class="title">Infrastructure</div>
+          <div class="desc">Docker (local) or Terraform (AWS)</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <div class="icon">🚀</div>
+          <div class="title">Launch</div>
+          <div class="desc">Single CLI command</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>What Gets Deployed</h2>
+      <div class="grid-3">
+        <div class="stat-box">
+          <div class="num" style="font-size:20px">Kafka / SQS</div>
+          <div class="label">Message Bus</div>
+        </div>
+        <div class="stat-box">
+          <div class="num" style="font-size:20px">S3 + Iceberg</div>
+          <div class="label">Data Lake</div>
+        </div>
+        <div class="stat-box">
+          <div class="num" style="font-size:20px">Spark Cluster</div>
+          <div class="label">Compute Engine</div>
+        </div>
+      </div>
+      <p style="margin-top:12px">Local dev uses Docker containers (Kafka, MinIO, Spark). Production uses managed AWS services (MSK, S3, EMR/ECS) via Terraform — same YAML configs.</p>
+    </div>
+  </div>
+
+  <!-- TECH: Setup -->
+  <div class="tech-only">
+    <div class="card">
+      <h2>Environment Setup</h2>
+      <p class="section-sub">Step-by-step local development bootstrap</p>
+
+      <div class="expandable open">
+        <div class="expand-header" onclick="toggle(this)">
+          <span class="expand-chevron">▶</span>
+          Step 1: Clone &amp; Install Dependencies
+        </div>
+        <div class="expand-body">
+          <pre class="code-block"><span class="cmt"># Clone and create virtual environment</span>
+git clone https://github.com/efrenatmckinsey/de-agent.git
+<span class="kw">cd</span> de-agent
+python3 -m venv .venv && <span class="kw">source</span> .venv/bin/activate
+pip install -r requirements.txt
+
+<span class="cmt"># Copy environment template and fill in values</span>
+cp .env.template .env
+<span class="cmt"># Edit .env with your API keys (optional for public APIs)</span></pre>
+        </div>
+      </div>
+
+      <div class="expandable">
+        <div class="expand-header" onclick="toggle(this)">
+          <span class="expand-chevron">▶</span>
+          Step 2: Platform Configuration (<code>config/platform.yaml</code>)
+        </div>
+        <div class="expand-body">
+          <pre class="code-block"><span class="cmt"># Central control plane: routing, scaling, storage, governance</span>
+<span class="kw">platform</span>:
+  name: hydra-ingest
+  environment: dev          <span class="cmt"># dev → local queue; prod → Kafka</span>
+
+<span class="kw">topic_router</span>:
+  kafka:
+    local:
+      bootstrap_servers: <span class="str">"localhost:9092"</span>
+  topic: <span class="str">hydra.ingestion.commands</span>
+
+<span class="kw">autoscaler</span>:
+  min_replicas: <span class="num">1</span>
+  max_replicas: <span class="num">20</span>
+  idle_shutdown_minutes: <span class="num">45</span>  <span class="cmt"># scale to zero when idle</span>
+
+<span class="kw">storage</span>:
+  s3:
+    bucket: hydra-data-lake
+    base_paths:
+      raw: <span class="str">s3://hydra-data-lake/raw</span>
+      curated: <span class="str">s3://hydra-data-lake/curated</span>
+  iceberg:
+    catalog:
+      type: glue             <span class="cmt"># AWS Glue catalog for Iceberg tables</span></pre>
+        </div>
+      </div>
+
+      <div class="expandable">
+        <div class="expand-header" onclick="toggle(this)">
+          <span class="expand-chevron">▶</span>
+          Step 3: Define Sources (<code>config/sources/*.yaml</code>)
+        </div>
+        <div class="expand-body">
+          <pre class="code-block"><span class="cmt"># Example: USDA FoodData Central API</span>
+<span class="kw">source_id</span>: usda_food_data
+<span class="kw">type</span>: api
+
+<span class="kw">connection</span>:
+  base_url: <span class="str">https://api.nal.usda.gov/fdc/v1</span>
+  auth:
+    method: query_param
+    param_name: api_key
+    value_from_env: USDA_API_KEY
+  rate_limit:
+    requests_per_second: <span class="num">5</span>
+
+<span class="kw">schedule</span>:
+  cron: <span class="str">"0 2 * * *"</span>       <span class="cmt"># daily at 2am</span>
+
+<span class="kw">governance</span>:
+  classification: public
+  retention_days: <span class="num">365</span>
+
+<span class="kw">quality_checks</span>:
+  - type: non_null
+    fields: [fdcId, description]
+  - type: valid_range
+    field: score
+    min: <span class="num">0</span>
+    max: <span class="num">100</span></pre>
+          <p>Three source types are pre-configured: <span class="badge badge-green">API</span> <span class="badge badge-amber">Stream</span> <span class="badge badge-cyan">Batch</span></p>
+        </div>
+      </div>
+
+      <div class="expandable">
+        <div class="expand-header" onclick="toggle(this)">
+          <span class="expand-chevron">▶</span>
+          Step 4: Start Local Infrastructure
+        </div>
+        <div class="expand-body">
+          <pre class="code-block"><span class="kw">cd</span> infra && docker-compose up -d
+
+<span class="cmt"># Services started:</span>
+<span class="cmt">#   Kafka          → localhost:9092</span>
+<span class="cmt">#   MinIO (S3)     → localhost:9000  (console: 9001)</span>
+<span class="cmt">#   Spark Master   → localhost:8080</span>
+<span class="cmt">#   Prometheus     → localhost:9090</span>
+<span class="cmt">#   Grafana        → localhost:3000</span></pre>
+        </div>
+      </div>
+
+      <div class="expandable">
+        <div class="expand-header" onclick="toggle(this)">
+          <span class="expand-chevron">▶</span>
+          Step 5: Launch the Orchestrator
+        </div>
+        <div class="expand-body">
+          <pre class="code-block"><span class="cmt"># Start the command loop</span>
+python -m src.cli run
+
+<span class="cmt"># Or trigger a single ingestion</span>
+python -m src.cli ingest-now usda_food_data
+
+<span class="cmt"># Validate a transform DSL</span>
+python -m src.cli validate config/transforms/food_enrichment.yaml
+
+<span class="cmt"># List all sources</span>
+python -m src.cli list-sources</pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>AWS Production Deployment</h2>
+      <pre class="code-block"><span class="kw">cd</span> infra/terraform
+terraform init && terraform plan -var=<span class="str">"environment=prod"</span>
+terraform apply
+
+<span class="cmt"># Provisions: S3 bucket, MSK (Kafka), ECS Fargate,</span>
+<span class="cmt"># Glue catalog, IAM roles, CloudWatch logs, VPC</span>
+
+<span class="cmt"># Kubernetes alternative:</span>
+kubectl apply -f infra/k8s/deployment.yaml
+<span class="cmt"># Includes HPA (auto-scale 1→10 pods on CPU/memory/queue_depth)</span></pre>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- PHASE 2: ARCHITECTURE                                         -->
+<!-- ============================================================ -->
+<div class="phase-panel" id="panel-arch">
+
+  <!-- EXEC: Architecture -->
+  <div class="exec-only">
+    <div class="card">
+      <h2>How It Works — The Big Picture</h2>
+      <p>The platform operates as an intelligent data pipeline that automatically discovers sources, chooses the optimal processing engine, and ensures data quality and governance at every step.</p>
+
+      <div class="flow-diagram" style="margin-top: 20px;">
+        <div class="flow-step" style="border-color: var(--amber)">
+          <div class="icon">📡</div>
+          <div class="title">Discover</div>
+          <div class="desc">Auto-detect source schema, volume, freshness</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step" style="border-color: var(--cyan)">
+          <div class="icon">📥</div>
+          <div class="title">Ingest</div>
+          <div class="desc">API, streaming, or batch — connectors auto-selected</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step" style="border-color: var(--accent)">
+          <div class="icon">⚡</div>
+          <div class="title">Transform</div>
+          <div class="desc">Spark for big data, Python for small — auto-chosen</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step" style="border-color: var(--green)">
+          <div class="icon">🏗️</div>
+          <div class="title">Store</div>
+          <div class="desc">S3 data lake with Iceberg tables</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step" style="border-color: var(--exec-accent)">
+          <div class="icon">🛡️</div>
+          <div class="title">Govern</div>
+          <div class="desc">PII detection, lineage, quality gates</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Business Capabilities</h2>
+      <div class="grid-2">
+        <div>
+          <h3>🎯 Self-Optimizing Compute</h3>
+          <p>Automatically selects Spark for large datasets and lightweight Python for small ones. Scales to zero when idle — you only pay for what you use.</p>
+        </div>
+        <div>
+          <h3>🔍 Source Intelligence</h3>
+          <p>Before ingesting, the platform probes each source to learn its schema, estimate volume, and detect if data has changed. No wasted processing on stale data.</p>
+        </div>
+        <div>
+          <h3>🛡️ Built-In Governance</h3>
+          <p>Every record is scanned for PII (emails, SSNs, credit cards). Data lineage tracks where each row came from and where it went. Quality gates prevent bad data from reaching your lake.</p>
+        </div>
+        <div>
+          <h3>📊 Full Observability</h3>
+          <p>Prometheus metrics, OpenTelemetry traces, and structured JSON logs — out of the box. Dashboards in Grafana show ingestion rates, error rates, and quality scores in real time.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Cost &amp; Operational Impact</h2>
+      <div class="stat-row">
+        <div class="stat-box">
+          <div class="num">~60%</div>
+          <div class="label">Lower Compute Cost</div>
+        </div>
+        <div class="stat-box">
+          <div class="num">Zero</div>
+          <div class="label">Manual Schema Mapping</div>
+        </div>
+        <div class="stat-box">
+          <div class="num">100%</div>
+          <div class="label">Lineage Coverage</div>
+        </div>
+        <div class="stat-box">
+          <div class="num">8</div>
+          <div class="label">Quality Check Types</div>
+        </div>
+      </div>
+      <p style="color:var(--text-dim); font-size: 13px; margin-top: 8px;">Compute savings driven by idle-shutdown (scale to zero) and engine auto-selection (Spark only when needed).</p>
+    </div>
+  </div>
+
+  <!-- TECH: Architecture -->
+  <div class="tech-only">
+    <div class="card">
+      <h2>System Architecture</h2>
+      <p class="section-sub">Component topology and data flow</p>
+
+      <div class="arch-svg-wrap">
+        <svg viewBox="0 0 1000 520" xmlns="http://www.w3.org/2000/svg" style="font-family: Inter, sans-serif;">
+          <!-- Background grid -->
+          <defs>
+            <marker id="ah" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="8" markerHeight="6" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#6366f1"/></marker>
+            <marker id="ah-g" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="8" markerHeight="6" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#22c55e"/></marker>
+          </defs>
+
+          <!-- Topic Router -->
+          <rect x="20" y="20" width="180" height="70" rx="12" fill="#1e1b4b" stroke="#6366f1" stroke-width="1.5"/>
+          <text x="110" y="50" text-anchor="middle" fill="#a5b4fc" font-size="11" font-weight="700">TOPIC ROUTER</text>
+          <text x="110" y="68" text-anchor="middle" fill="#64748b" font-size="9">Kafka / Local Queue</text>
+
+          <!-- Context Layer -->
+          <rect x="240" y="20" width="180" height="70" rx="12" fill="#1a1a2e" stroke="#f59e0b" stroke-width="1.5"/>
+          <text x="330" y="50" text-anchor="middle" fill="#fbbf24" font-size="11" font-weight="700">CONTEXT LAYER</text>
+          <text x="330" y="68" text-anchor="middle" fill="#64748b" font-size="9">Discovery &amp; Reflection</text>
+
+          <!-- Arrow: Router → Context -->
+          <line x1="200" y1="55" x2="238" y2="55" stroke="#6366f1" stroke-width="1.5" marker-end="url(#ah)"/>
+
+          <!-- Ingestors -->
+          <rect x="40" y="130" width="120" height="50" rx="10" fill="#1a2332" stroke="#06b6d4" stroke-width="1"/>
+          <text x="100" y="157" text-anchor="middle" fill="#67e8f9" font-size="10" font-weight="600">API Source</text>
+
+          <rect x="180" y="130" width="120" height="50" rx="10" fill="#1a2332" stroke="#06b6d4" stroke-width="1"/>
+          <text x="240" y="157" text-anchor="middle" fill="#67e8f9" font-size="10" font-weight="600">Stream Source</text>
+
+          <rect x="320" y="130" width="120" height="50" rx="10" fill="#1a2332" stroke="#06b6d4" stroke-width="1"/>
+          <text x="380" y="157" text-anchor="middle" fill="#67e8f9" font-size="10" font-weight="600">Batch Source</text>
+
+          <!-- Arrows: Context → Ingestors -->
+          <line x1="270" y1="90" x2="100" y2="128" stroke="#f59e0b" stroke-width="1" stroke-dasharray="4 3"/>
+          <line x1="330" y1="90" x2="240" y2="128" stroke="#f59e0b" stroke-width="1" stroke-dasharray="4 3"/>
+          <line x1="380" y1="90" x2="380" y2="128" stroke="#f59e0b" stroke-width="1" stroke-dasharray="4 3"/>
+
+          <!-- Engine Selector -->
+          <rect x="480" y="20" width="200" height="70" rx="12" fill="#1b2033" stroke="#8b5cf6" stroke-width="1.5"/>
+          <text x="580" y="45" text-anchor="middle" fill="#c4b5fd" font-size="11" font-weight="700">ENGINE SELECTOR</text>
+          <text x="580" y="62" text-anchor="middle" fill="#64748b" font-size="9">volume &lt; threshold → Python</text>
+          <text x="580" y="74" text-anchor="middle" fill="#64748b" font-size="9">volume ≥ threshold → Spark</text>
+
+          <!-- Arrow: Context → Engine -->
+          <line x1="420" y1="55" x2="478" y2="55" stroke="#6366f1" stroke-width="1.5" marker-end="url(#ah)"/>
+
+          <!-- Spark Engine -->
+          <rect x="490" y="130" width="140" height="50" rx="10" fill="#2d1b1b" stroke="#ef4444" stroke-width="1"/>
+          <text x="560" y="152" text-anchor="middle" fill="#fca5a5" font-size="10" font-weight="600">Spark Engine</text>
+          <text x="560" y="167" text-anchor="middle" fill="#64748b" font-size="8">High volume / complex</text>
+
+          <!-- Python Engine -->
+          <rect x="650" y="130" width="140" height="50" rx="10" fill="#1b2d1b" stroke="#22c55e" stroke-width="1"/>
+          <text x="720" y="152" text-anchor="middle" fill="#86efac" font-size="10" font-weight="600">Python Engine</text>
+          <text x="720" y="167" text-anchor="middle" fill="#64748b" font-size="8">Low volume / simple</text>
+
+          <!-- Arrow: Selector → Engines -->
+          <line x1="540" y1="90" x2="540" y2="128" stroke="#8b5cf6" stroke-width="1" stroke-dasharray="4 3"/>
+          <line x1="620" y1="90" x2="700" y2="128" stroke="#8b5cf6" stroke-width="1" stroke-dasharray="4 3"/>
+
+          <!-- DSL Parser label -->
+          <rect x="830" y="130" width="140" height="50" rx="10" fill="#1a1d27" stroke="#64748b" stroke-width="1"/>
+          <text x="900" y="152" text-anchor="middle" fill="#94a3b8" font-size="10" font-weight="600">DSL Parser</text>
+          <text x="900" y="167" text-anchor="middle" fill="#64748b" font-size="8">YAML → TransformSpec</text>
+
+          <!-- Arrow: DSL → Engines -->
+          <line x1="830" y1="155" x2="792" y2="155" stroke="#64748b" stroke-width="1" marker-end="url(#ah)"/>
+
+          <!-- Storage Layer -->
+          <rect x="200" y="230" width="600" height="80" rx="14" fill="#0f2318" stroke="#22c55e" stroke-width="1.5"/>
+          <text x="500" y="258" text-anchor="middle" fill="#86efac" font-size="13" font-weight="700">S3 DATA LAKE + ICEBERG</text>
+          <text x="300" y="285" text-anchor="middle" fill="#475569" font-size="10">raw/</text>
+          <text x="500" y="285" text-anchor="middle" fill="#475569" font-size="10">curated/</text>
+          <text x="700" y="285" text-anchor="middle" fill="#475569" font-size="10">governed/</text>
+          <rect x="250" y="275" width="80" height="16" rx="4" fill="rgba(34,197,94,0.1)" stroke="#166534" stroke-width="0.5"/>
+          <rect x="450" y="275" width="80" height="16" rx="4" fill="rgba(34,197,94,0.1)" stroke="#166534" stroke-width="0.5"/>
+          <rect x="650" y="275" width="80" height="16" rx="4" fill="rgba(34,197,94,0.1)" stroke="#166534" stroke-width="0.5"/>
+
+          <!-- Arrows: Ingestors → Storage -->
+          <line x1="240" y1="180" x2="400" y2="228" stroke="#06b6d4" stroke-width="1.5" marker-end="url(#ah-g)"/>
+          <!-- Arrows: Engines → Storage -->
+          <line x1="600" y1="180" x2="550" y2="228" stroke="#8b5cf6" stroke-width="1.5" marker-end="url(#ah-g)"/>
+
+          <!-- Governance Row -->
+          <rect x="20" y="360" width="220" height="70" rx="12" fill="#2d1a1a" stroke="#ef4444" stroke-width="1"/>
+          <text x="130" y="388" text-anchor="middle" fill="#fca5a5" font-size="11" font-weight="700">PII CLASSIFIER</text>
+          <text x="130" y="410" text-anchor="middle" fill="#64748b" font-size="9">Email, SSN, Phone, CC, IP</text>
+
+          <rect x="260" y="360" width="220" height="70" rx="12" fill="#1b1a2d" stroke="#a78bfa" stroke-width="1"/>
+          <text x="370" y="388" text-anchor="middle" fill="#c4b5fd" font-size="11" font-weight="700">LINEAGE TRACKER</text>
+          <text x="370" y="410" text-anchor="middle" fill="#64748b" font-size="9">OpenLineage events</text>
+
+          <rect x="500" y="360" width="220" height="70" rx="12" fill="#1a2020" stroke="#22c55e" stroke-width="1"/>
+          <text x="610" y="388" text-anchor="middle" fill="#86efac" font-size="11" font-weight="700">QUALITY ENGINE</text>
+          <text x="610" y="410" text-anchor="middle" fill="#64748b" font-size="9">8 check types + gate</text>
+
+          <!-- Arrows: Storage → Governance -->
+          <line x1="350" y1="310" x2="130" y2="358" stroke="#ef4444" stroke-width="1" stroke-dasharray="4 3"/>
+          <line x1="500" y1="310" x2="370" y2="358" stroke="#a78bfa" stroke-width="1" stroke-dasharray="4 3"/>
+          <line x1="600" y1="310" x2="610" y2="358" stroke="#22c55e" stroke-width="1" stroke-dasharray="4 3"/>
+
+          <!-- Observability Row -->
+          <rect x="20" y="460" width="300" height="50" rx="10" fill="#1a1d27" stroke="#64748b" stroke-width="1"/>
+          <text x="170" y="490" text-anchor="middle" fill="#94a3b8" font-size="10">📊 Prometheus &nbsp; | &nbsp; 🔍 OpenTelemetry &nbsp; | &nbsp; 📝 structlog</text>
+
+          <!-- AutoScaler -->
+          <rect x="740" y="360" width="240" height="70" rx="12" fill="#1a1d27" stroke="#f59e0b" stroke-width="1.5"/>
+          <text x="860" y="388" text-anchor="middle" fill="#fbbf24" font-size="11" font-weight="700">AUTOSCALER</text>
+          <text x="860" y="408" text-anchor="middle" fill="#64748b" font-size="9">CPU / Memory / Queue → Scale</text>
+          <text x="860" y="420" text-anchor="middle" fill="#64748b" font-size="9">Idle → Shutdown</text>
+
+          <!-- Arrow: Scaler → Engines -->
+          <line x1="860" y1="360" x2="700" y2="182" stroke="#f59e0b" stroke-width="1" stroke-dasharray="4 3"/>
+        </svg>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Component Map</h2>
+      <p class="section-sub">Every module, its responsibility, and source file</p>
+
+      <div class="component-grid">
+        <div class="component-card">
+          <div class="cc-title"><span style="color:var(--accent)">●</span> Topic Router</div>
+          <div class="cc-desc">Kafka/local queue routing with priority ordering. Commands: ingest, transform, backfill.</div>
+          <div class="cc-file">src/core/topic_router.py</div>
+        </div>
+        <div class="component-card">
+          <div class="cc-title"><span style="color:var(--amber)">●</span> Context Layer</div>
+          <div class="cc-desc">HTTP probing, schema inference from samples, volume estimation, freshness checks. TTL cache.</div>
+          <div class="cc-file">src/core/context_layer.py</div>
+        </div>
+        <div class="component-card">
+          <div class="cc-title"><span style="color:var(--cyan)">●</span> API Source</div>
+          <div class="cc-desc">REST client with rate limiting, pagination (offset/cursor), retry with backoff on 429/5xx.</div>
+          <div class="cc-file">src/ingest/api_source.py</div>
+        </div>
+        <div class="component-card">
+          <div class="cc-title"><span style="color:var(--cyan)">●</span> Stream Source</div>
+          <div class="cc-desc">SSE + simulated polling with high-water mark dedup and reconnect logic.</div>
+          <div class="cc-file">src/ingest/stream_source.py</div>
+        </div>
+        <div class="component-card">
+          <div class="cc-title"><span style="color:var(--cyan)">●</span> Batch Source</div>
+          <div class="cc-desc">Full-dataset download with streaming to disk. JSON, CSV, Parquet formats.</div>
+          <div class="cc-file">src/ingest/batch_source.py</div>
+        </div>
+        <div class="component-card">
+          <div class="cc-title"><span style="color:var(--exec-accent)">●</span> DSL Parser</div>
+          <div class="cc-desc">YAML → TransformSpec with discriminated union steps. Validates and recommends engine.</div>
+          <div class="cc-file">src/transform/dsl_parser.py</div>
+        </div>
+        <div class="component-card">
+          <div class="cc-title"><span style="color:var(--red)">●</span> Spark Engine</div>
+          <div class="cc-desc">PySpark session with Iceberg extensions. Executes filter/flatten/agg/derive/join steps.</div>
+          <div class="cc-file">src/transform/spark_engine.py</div>
+        </div>
+        <div class="component-card">
+          <div class="cc-title"><span style="color:var(--green)">●</span> Python Engine</div>
+          <div class="cc-desc">Pure-Python transforms with SQL expression evaluator (incl. CASE WHEN). Zero external deps.</div>
+          <div class="cc-file">src/transform/python_engine.py</div>
+        </div>
+        <div class="component-card">
+          <div class="cc-title"><span style="color:var(--green)">●</span> Iceberg Writer</div>
+          <div class="cc-desc">S3/local Parquet output with PyIceberg catalog integration. Schema auto-detection.</div>
+          <div class="cc-file">src/storage/iceberg_writer.py</div>
+        </div>
+        <div class="component-card">
+          <div class="cc-title"><span style="color:var(--red)">●</span> PII Classifier</div>
+          <div class="cc-desc">Regex + column-name heuristics for 8 PII types. Auto-escalates public→confidential.</div>
+          <div class="cc-file">src/governance/classifier.py</div>
+        </div>
+        <div class="component-card">
+          <div class="cc-title"><span style="color:var(--exec-accent)">●</span> Lineage Tracker</div>
+          <div class="cc-desc">OpenLineage-compatible START/COMPLETE/FAIL events with schema + quality facets.</div>
+          <div class="cc-file">src/governance/lineage.py</div>
+        </div>
+        <div class="component-card">
+          <div class="cc-title"><span style="color:var(--green)">●</span> Quality Engine</div>
+          <div class="cc-desc">8 check types: not_null, valid_range, unique_key, row_count, regex, freshness, referential, custom_sql.</div>
+          <div class="cc-file">src/governance/quality.py</div>
+        </div>
+        <div class="component-card">
+          <div class="cc-title"><span style="color:var(--amber)">●</span> AutoScaler</div>
+          <div class="cc-desc">CPU/memory/queue thresholds → scale up/down/shutdown. Local: multiprocessing. AWS: ECS/EKS.</div>
+          <div class="cc-file">src/core/autoscaler.py</div>
+        </div>
+        <div class="component-card">
+          <div class="cc-title"><span style="color:var(--text-dim)">●</span> Orchestrator</div>
+          <div class="cc-desc">Main DAG: consume commands → discover → ingest → transform → store → lineage → quality → metrics.</div>
+          <div class="cc-file">src/core/orchestrator.py</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- PHASE 3: EXECUTION                                            -->
+<!-- ============================================================ -->
+<div class="phase-panel" id="panel-exec">
+
+  <!-- EXEC: Execution -->
+  <div class="exec-only">
+    <div class="card">
+      <h2>Live Data Pipeline</h2>
+      <p>When a data request arrives, the platform executes this pipeline automatically — no human intervention needed.</p>
+
+      <div class="pipeline-anim">
+        <div class="packet p1"></div>
+        <div class="packet p2"></div>
+        <div class="packet p3"></div>
+        <div class="stage-label" style="left:2%">COMMAND</div>
+        <div class="stage-line" style="left:18%"></div>
+        <div class="stage-label" style="left:19%">DISCOVER</div>
+        <div class="stage-line" style="left:36%"></div>
+        <div class="stage-label" style="left:37%">INGEST</div>
+        <div class="stage-line" style="left:54%"></div>
+        <div class="stage-label" style="left:55%">TRANSFORM</div>
+        <div class="stage-line" style="left:72%"></div>
+        <div class="stage-label" style="left:73%">QUALITY</div>
+        <div class="stage-line" style="left:88%"></div>
+        <div class="stage-label" style="left:89%">STORE</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Sample Data Sources — Running Today</h2>
+      <div class="grid-3">
+        <div style="background:var(--surface2); border-radius:12px; padding:18px; border:1px solid var(--border)">
+          <div style="font-size:24px; margin-bottom:8px">🥕</div>
+          <div style="font-weight:700; color:var(--text-bright)">USDA Food Data</div>
+          <div style="font-size:12px; color:var(--text-dim); margin-top:4px">REST API — 300K+ food items with nutrient profiles. Daily ingestion via CRON.</div>
+          <div class="badge badge-green" style="margin-top:8px">API</div>
+        </div>
+        <div style="background:var(--surface2); border-radius:12px; padding:18px; border:1px solid var(--border)">
+          <div style="font-size:24px; margin-bottom:8px">🌤️</div>
+          <div style="font-weight:700; color:var(--text-bright)">NOAA Weather</div>
+          <div style="font-size:12px; color:var(--text-dim); margin-top:4px">Live observations from 5 stations, polled every 30s. Real-time streaming feed.</div>
+          <div class="badge badge-amber" style="margin-top:8px">STREAM</div>
+        </div>
+        <div style="background:var(--surface2); border-radius:12px; padding:18px; border:1px solid var(--border)">
+          <div style="font-size:24px; margin-bottom:8px">📊</div>
+          <div style="font-weight:700; color:var(--text-bright)">US Census Bureau</div>
+          <div style="font-size:12px; color:var(--text-dim); margin-top:4px">Population, poverty, housing data across all 50 states. Monthly batch refresh.</div>
+          <div class="badge badge-cyan" style="margin-top:8px">BATCH</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Governance in Action</h2>
+      <p>Every ingestion cycle automatically performs these governance checks:</p>
+      <div class="grid-2" style="margin-top:16px">
+        <div>
+          <h3>🔒 PII Detection</h3>
+          <p>Scans every column for sensitive data patterns. If PII is found in a "public" dataset, the classification is automatically escalated and the team is alerted.</p>
+        </div>
+        <div>
+          <h3>📈 Quality Gates</h3>
+          <p>Configurable checks run before data lands in the lake. If critical violations are found, the pipeline halts — bad data never reaches downstream consumers.</p>
+        </div>
+        <div>
+          <h3>🗺️ Data Lineage</h3>
+          <p>Every row is traceable: where it came from (source API), what transforms were applied, and where it was stored. Full audit trail for compliance.</p>
+        </div>
+        <div>
+          <h3>📉 Auto-Scaling Economics</h3>
+          <p>Workers scale up during peak ingestion and shut down after 45 minutes of idle time. Compute costs track actual usage, not provisioned capacity.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TECH: Execution -->
+  <div class="tech-only">
+    <div class="card">
+      <h2>Runtime Execution Flow</h2>
+      <p class="section-sub">What happens when a command hits the orchestrator</p>
+
+      <div class="pipeline-anim" style="height:60px">
+        <div class="packet p1"></div>
+        <div class="packet p2"></div>
+        <div class="packet p3"></div>
+        <div class="stage-label" style="left:2%">COMMAND</div>
+        <div class="stage-line" style="left:15%"></div>
+        <div class="stage-label" style="left:16%">DISCOVER</div>
+        <div class="stage-line" style="left:30%"></div>
+        <div class="stage-label" style="left:31%">INGEST</div>
+        <div class="stage-line" style="left:44%"></div>
+        <div class="stage-label" style="left:45%">STORE RAW</div>
+        <div class="stage-line" style="left:58%"></div>
+        <div class="stage-label" style="left:59%">TRANSFORM</div>
+        <div class="stage-line" style="left:72%"></div>
+        <div class="stage-label" style="left:73%">LINEAGE</div>
+        <div class="stage-line" style="left:84%"></div>
+        <div class="stage-label" style="left:85%">QUALITY</div>
+        <div class="stage-line" style="left:95%"></div>
+        <div class="stage-label" style="left:96%">✓</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>1. Command Dispatch</h2>
+      <pre class="code-block"><span class="cmt"># A command arrives on the Kafka topic (or local queue in dev):</span>
+{
+  <span class="str">"source_id"</span>: <span class="str">"usda_food_data"</span>,
+  <span class="str">"action"</span>: <span class="str">"ingest"</span>,
+  <span class="str">"priority"</span>: <span class="num">1</span>,
+  <span class="str">"payload"</span>: {}
+}
+
+<span class="cmt"># The orchestrator deserializes it into an IngestionCommand (Pydantic model)
+# and routes based on action: ingest → full cycle, transform → transform-only</span></pre>
+    </div>
+
+    <div class="card">
+      <h2>2. Context Discovery</h2>
+      <pre class="code-block"><span class="cmt"># ContextLayer probes the source endpoint before ingestion:</span>
+
+context = <span class="kw">await</span> context_layer.<span class="fn">get_or_discover</span>(source_id, source_config)
+
+<span class="cmt"># 1. endpoint_probe()  → HEAD request, parse headers (content-type, pagination, etag)
+# 2. schema_discovery() → GET sample, infer column names + types + nullability
+# 3. volume_estimation() → Extract total from pagination or extrapolate from sample
+# 4. freshness_check()  → Compare ETag/Last-Modified to skip unchanged data</span>
+
+<span class="cmt"># Result is cached with TTL (default 1h) to avoid hammering the API</span>
+<span class="cmt"># Returns: SourceContext(inferred_schema, estimated_rows, content_type, ...)</span></pre>
+    </div>
+
+    <div class="card">
+      <h2>3. Adaptive Ingestion</h2>
+      <pre class="code-block"><span class="cmt"># The ingestor is selected based on source type in YAML config:</span>
+ingestor = <span class="fn">select_ingestor</span>(source_config[<span class="str">"type"</span>])  <span class="cmt"># api | stream | batch</span>
+
+<span class="cmt"># API:    httpx + rate limiter (semaphore) + pagination + retry (exp backoff)
+# Stream: SSE or simulated poll with high-water mark dedup
+# Batch:  Stream-to-disk download, parse JSON/CSV/Parquet</span>
+
+records = <span class="kw">await</span> ingestor.<span class="fn">ingest</span>(source_config=config, context=context)
+raw_uri = <span class="kw">await</span> storage.<span class="fn">write_raw</span>(source_id=sid, records=records, context=context)</pre>
+    </div>
+
+    <div class="card">
+      <h2>4. Engine Selection &amp; Transform</h2>
+      <pre class="code-block"><span class="cmt"># The DSL parser loads the transform spec from YAML:</span>
+spec = DSLParser.<span class="fn">parse_file</span>(<span class="str">"config/transforms/food_enrichment.yaml"</span>)
+
+<span class="cmt"># Engine auto-selection based on volume:</span>
+<span class="kw">if</span> spec.engine_hint == <span class="str">"auto"</span>:
+    engine = <span class="str">"spark"</span> <span class="kw">if</span> context.estimated_rows >= spec.volume_threshold <span class="kw">else</span> <span class="str">"python"</span>
+
+<span class="cmt"># Both engines execute the same step types:</span>
+<span class="cmt">#   filter → flatten → rename → cast → derive → aggregate → quality_gate → join</span>
+
+<span class="cmt"># Spark: pyspark DataFrame operations (df.filter, df.groupBy.agg, df.withColumn)
+# Python: list[dict] with ExpressionEvaluator (supports CASE WHEN, IS NOT NULL, etc.)</span></pre>
+    </div>
+
+    <div class="card">
+      <h2>5. Transform DSL Example</h2>
+      <pre class="code-block"><span class="kw">transform_id</span>: food_nutrient_enrichment
+<span class="kw">engine_hint</span>: auto
+<span class="kw">volume_threshold</span>: <span class="num">100000</span>
+<span class="kw">source</span>: usda_food_data
+
+<span class="kw">steps</span>:
+  - <span class="kw">type</span>: filter
+    <span class="kw">where</span>: <span class="str">"nutrients IS NOT NULL"</span>
+
+  - <span class="kw">type</span>: flatten
+    <span class="kw">column</span>: nutrients
+    <span class="kw">into</span>: [nutrient_name, nutrient_value, unit]
+
+  - <span class="kw">type</span>: aggregate
+    <span class="kw">group_by</span>: [food_category]
+    <span class="kw">measures</span>:
+      - { column: nutrient_value, function: avg, alias: avg_nutrient }
+      - { column: nutrient_value, function: max, alias: max_nutrient }
+
+  - <span class="kw">type</span>: quality_gate
+    <span class="kw">checks</span>:
+      - { type: not_null, columns: [food_category, avg_nutrient] }
+      - { type: valid_range, column: nutrient_density, min: <span class="num">0</span>, max: <span class="num">10000</span> }
+
+<span class="kw">output</span>:
+  table: curated.food_nutrients
+  format: iceberg
+  partition_by: [food_category]</pre>
+    </div>
+
+    <div class="card">
+      <h2>6. Governance Pipeline</h2>
+      <pre class="code-block"><span class="cmt"># All three governance checks run on every ingestion cycle:</span>
+
+<span class="cmt"># A. PII Classification</span>
+result = classifier.<span class="fn">classify_records</span>(source_id, records, governance_config)
+<span class="cmt"># Scans for: EMAIL, PHONE, SSN, CREDIT_CARD, IP, NAME, ADDRESS, DOB
+# If PII found on "public" dataset → auto-escalate to CONFIDENTIAL</span>
+
+<span class="cmt"># B. Lineage (OpenLineage-compatible)</span>
+run_id = tracker.<span class="fn">start_run</span>(<span class="str">"ingest:usda_food_data"</span>, inputs=[...], outputs=[...])
+tracker.<span class="fn">complete_run</span>(run_id, outputs_with_facets=[...])
+<span class="cmt"># Emits: schema facet, data quality facet, transform facet</span>
+
+<span class="cmt"># C. Quality Gate</span>
+qr = engine.<span class="fn">run_checks</span>(source_id, records, checks_config, gate_config)
+<span class="cmt"># gate_config: { fail_on_critical: true, warn_threshold: 0.95 }
+# If qr.passed_gate is False → pipeline halts, alert emitted</span></pre>
+    </div>
+
+    <div class="card">
+      <h2>7. Scaling Behavior</h2>
+      <pre class="code-block"><span class="cmt"># The autoscaler runs on a periodic loop (default: every 120s)</span>
+
+metrics = ComponentMetrics(
+    cpu_percent=<span class="num">82.5</span>,    <span class="cmt"># above 75% threshold → SCALE_UP</span>
+    memory_mb=<span class="num">4096.0</span>,
+    queue_depth=<span class="num">250</span>,
+    last_active=now,
+)
+
+decision = autoscaler.<span class="fn">evaluate</span>(metrics, config)  <span class="cmt"># → ScalingDecision.SCALE_UP</span>
+<span class="kw">await</span> autoscaler.<span class="fn">apply_decision</span>(decision)
+
+<span class="cmt"># Local:  spawns multiprocessing.Process workers
+# AWS:    calls ECS UpdateService (desired_count += 1)
+# K8s:    HPA handles it natively via custom queue_depth metric
+# Idle:   after 45min with no commands → SHUTDOWN (scale to zero)</span></pre>
+    </div>
+
+    <div class="card">
+      <h2>Test Coverage</h2>
+      <div class="stat-row">
+        <div class="stat-box">
+          <div class="num">57</div>
+          <div class="label">Tests Passing</div>
+        </div>
+        <div class="stat-box">
+          <div class="num">6</div>
+          <div class="label">Test Suites</div>
+        </div>
+        <div class="stat-box">
+          <div class="num">&lt; 1s</div>
+          <div class="label">Full Suite Runtime</div>
+        </div>
+      </div>
+      <pre class="code-block">pytest tests/ -v
+<span class="cmt"># test_topic_router.py   — command validation, priority queue, routing
+# test_context_layer.py  — schema inference, TTL cache, serialization
+# test_dsl_parser.py     — step parsing, validation, engine recommendation
+# test_python_engine.py  — filter, rename, cast, aggregate, quality gate, multi-step
+# test_quality.py        — all 8 check types, gate thresholds, aliases
+# test_governance.py     — PII detection, lineage graph, facet building</span></pre>
+    </div>
+  </div>
+</div>
+
+</div><!-- /content -->
+
+<div style="text-align:center; padding: 32px; color: var(--text-dim); font-size: 12px; border-top: 1px solid var(--border); margin-top: 40px;">
+  hydra-ingest &nbsp;·&nbsp; <a href="https://github.com/efrenatmckinsey/de-agent" style="color:var(--accent2)">github.com/efrenatmckinsey/de-agent</a>
+</div>
+
+<script>
+  let currentMode = 'exec';
+  let currentPhase = 'setup';
+
+  function setMode(mode) {
+    currentMode = mode;
+    document.body.className = 'mode-' + mode;
+    document.getElementById('btn-exec').className = mode === 'exec' ? 'mode-btn active-exec' : 'mode-btn';
+    document.getElementById('btn-tech').className = mode === 'tech' ? 'mode-btn active-tech' : 'mode-btn';
+  }
+
+  function setPhase(phase) {
+    currentPhase = phase;
+    document.querySelectorAll('.phase-panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('panel-' + phase).classList.add('active');
+    document.querySelectorAll('.phase-tab').forEach(t => t.classList.remove('active'));
+    const tabs = document.querySelectorAll('.phase-tab');
+    const idx = { setup: 0, arch: 1, exec: 2 }[phase];
+    tabs[idx].classList.add('active');
+  }
+
+  function toggle(header) {
+    header.parentElement.classList.toggle('open');
+  }
+</script>
+</body>
+</html>
